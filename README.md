@@ -2,6 +2,10 @@
   <img src="openai_realtime_voice_agent/icon.png" alt="Qwen Omni Realtime Voice Agent for Home Assistant Voice PE" width="160"/>
 </p>
 
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 # Qwen Omni Realtime Voice Agent for Home Assistant Voice PE
 
 A Home Assistant OS Add-on that connects custom Voice PE firmware directly to
