@@ -1,0 +1,179 @@
+name: Qwen Omni Realtime Voice Agent
+version: "0.9.0"
+slug: openai_realtime_voice_agent
+description: Native Qwen Omni Realtime speech-to-speech voice agent for Home Assistant Voice PE, with MCP device control.
+url: https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: application
+boot: auto
+host_network: true
+# Gives the add-on SUPERVISOR_TOKEN so it can reach Home Assistant (used as a
+# fallback auth token for the MCP server when longlived_token is left blank).
+homeassistant_api: true
+
+# ----------------------------------------------------------------------------
+# Options are ORDERED for the Configuration tab (HA renders them in this order)
+# and pseudo-grouped via name prefixes in translations/{en,zh-Hans}.yaml:
+#   🔑 Basics → 🗣️ Model & voice → 💬 Conversation → 🌐 Web search → 🎚️ Audio
+#   → 🏠 Home Assistant → ⚙️ Advanced → 🔍 Debug
+# User-facing help lives in translations/, not here — keep comments dev-facing.
+#
+# REMOVED options (v0.4.29) — hardcoded to the only sane value; main.py keeps
+# env fallbacks so absent vars are fine:
+#   semantic_vad_create_response → true  (false breaks every multi-turn chat:
+#     pipecat 0.0.97 only auto-creates the FIRST response, the 2nd turn hangs)
+#   enable_disconnect_tool → false  (model could hang up mid-conversation)
+#   interrupt_response → false  (handsfree barge-in shelved: the speaker→mic
+#     echo leak made the VAD cut replies / squeal; firmware is barge_in:false)
+#   device_input_sample_rate → 16000  (the Voice PE firmware always sends 16k)
+# The server_vad escape hatch (turn_detection_type + vad_*) is KEPT but
+# optional-without-default → hidden behind the UI's "Show unused optional
+# configuration options" toggle on fresh installs. Same trick (v0.4.30) for
+# the four *_custom escape-hatch fields: optional, no default, hidden until
+# needed (the dropdown descriptions tell users how to reveal them).
+# NB the add-on UI renders every string option as a SINGLE-LINE input — there
+# is no multiline/textarea support in the frontend (verified in
+# supervisor-app-config.ts), so long text like `instructions` is best edited
+# via the Configuration tab's ⋮ → "Edit in YAML".
+# ----------------------------------------------------------------------------
+options:
+  # --- 🔑 Basics ---
+  qwen_api_key: ""
+  qwen_workspace_id: ""
+  qwen_region: "cn-beijing"
+  instructions: >-
+    You are the cheerful, friendly voice assistant of Home Assistant and you
+    control the smart home. LANGUAGE: Reply naturally in the language used by
+    the user in the current conversation. STYLE: Your replies are read aloud,
+    so keep them short and conversational. Do not read out entity IDs, long
+    lists, or technical names; use ordinary device names. Call tools silently —
+    say nothing like "let me check" or "one moment" before an action. Execute
+    the tool first, then give one complete confirmation based on its result.
+    BEHAVIOR: Never claim an action succeeded before the tool result confirms
+    it. Never guess a device, room, mode, or value. If the target is ambiguous,
+    ask one short clarifying question. If an action fails, briefly say what
+    failed without inventing a successful result.
+  transcription_language: ""
+
+  # --- 🗣️ Model & voice ---
+  # (*_custom fields have NO defaults: optional → hidden until revealed via
+  # "Show unused optional configuration options" or set in YAML.)
+  qwen_model: "qwen3.5-omni-flash-realtime"
+  qwen_voice: "Tina"
+  # Kept as a legacy internal option name so existing configurations continue
+  # to work. The Configuration tab presents it as Qwen playback speed.
+  openai_speed: 1.0
+  max_output_tokens: 0
+
+  # --- 💬 Conversation ---
+  follow_up_listen_seconds: 8
+  # 700 (not 0/200): a reply tail that survives the device AEC and arrives
+  # ALONE in the open follow-up mic becomes a ghost turn — verified live
+  # 2026-06-12 23:18 at 300 ms: the reply's own i2s/DAC tail (~600 ms) leaked
+  # into the fresh mic, the VAD committed it as an (empty) turn and the model
+  # answered the previous question AGAIN. 700 covers the tail with margin.
+  follow_up_open_delay_ms: 700
+  # Same echo guard at the WAKE boundary: delay after the wake chime before the
+  # mic opens. The chime's own i2s/DAC tail otherwise leaks into the fresh mic
+  # and becomes a ghost turn (verified live 2026-06-12 23:27 — a wake produced
+  # an unprompted answer). Was a hardcoded 400 ms in the firmware yaml; now sent
+  # in `hello` so it's tunable like follow_up_open_delay_ms.
+  wake_open_delay_ms: 700
+  vad_eagerness: "low"
+  phase_idle_debounce_ms: 1500
+
+  # --- 🌐 Web search ---
+  enable_web_search: false
+  # Native Qwen Realtime cannot use its function tools and web search together.
+  # This legacy option remains optional for backward compatibility but is hidden
+  # on fresh installs.
+
+  # --- 🎚️ Audio ---
+  # 150 (not 0): cushions WS jitter so the speaker doesn't run dry mid-word
+  # (the start-of-reply crackle); costs 150 ms of reply latency.
+  playback_prebuffer_ms: 150
+  noise_reduction: "off"
+
+  # --- 🏠 Home Assistant ---
+  ha_mcp_url: ""
+  longlived_token: ""
+  # Keep the Qwen control surface deterministic by default. This limits tool
+  # kinds, not Home Assistant entities; all entity names remain available.
+  mcp_tool_allowlist: "GetLiveContext,HassTurnOn,HassTurnOff,HassLightSet"
+  # Auto-discover device capabilities and expose extra tools (空调模式/风速/摆风、
+  # 净化器预设、select 选项) to Qwen. On by default. The comma list picks which
+  # capability types to enable (climate_mode,climate_fan,climate_swing,
+  # fan_preset,select_option); empty = all discovered.
+  auto_tool_generation: true
+  auto_tool_capabilities: "climate_mode,climate_fan,climate_swing,fan_preset,select_option"
+
+  # --- ⚙️ Advanced ---
+  websocket_port: 8080
+  session_reuse_timeout_seconds: 300
+  max_context_messages: 12
+  transcription_model: "qwen3-asr-flash-realtime"
+  # (turn_detection_type + vad_* deliberately have NO defaults here — see the
+  # header comment; semantic_vad is the hardwired default in main.py.)
+
+  # --- 🔍 Debug ---
+  enable_recording: false
+  qwen_tool_debug: false
+  qwen_tool_timeout_seconds: 15
+
+schema:
+  # --- 🔑 Basics ---
+  qwen_api_key: password
+  qwen_workspace_id: str
+  qwen_region: str
+  instructions: str
+  transcription_language: str?
+  # --- 🗣️ Model & voice ---
+  qwen_model: "list(qwen3.5-omni-flash-realtime|qwen3.5-omni-plus-realtime|custom)"
+  qwen_model_custom: str?
+  qwen_voice: "list(Tina|Ethan|custom)"
+  qwen_voice_custom: str?
+  openai_speed: float(0.25,1.5)
+  max_output_tokens: int(0,4096)
+  # --- 💬 Conversation ---
+  follow_up_listen_seconds: int(0,60)
+  follow_up_open_delay_ms: int(0,5000)
+  wake_open_delay_ms: int(0,5000)
+  vad_eagerness: "list(low|medium|high|auto)"
+  phase_idle_debounce_ms: int(0,10000)
+  # --- 🌐 Web search ---
+  enable_web_search: bool
+  web_search_model: str?
+  web_search_model_custom: str?
+  # --- 🎚️ Audio ---
+  playback_prebuffer_ms: int(0,2000)
+  noise_reduction: "list(off|near_field|far_field)"
+  # --- 🏠 Home Assistant ---
+  ha_mcp_url: str
+  longlived_token: password
+  mcp_tool_allowlist: str
+  auto_tool_generation: bool
+  auto_tool_capabilities: str
+  # --- ⚙️ Advanced ---
+  websocket_port: int(1024,65535)
+  session_reuse_timeout_seconds: int(0,3600)
+  max_context_messages: int(0,100)
+  transcription_model: str
+  transcription_model_custom: str?
+  # Legacy server_vad escape hatch — optional, hidden until "Show unused
+  # optional configuration options" is toggled (or a value is saved).
+  turn_detection_type: "list(semantic_vad|server_vad)?"
+  vad_threshold: "float(0,1)?"
+  vad_prefix_padding_ms: int?
+  vad_silence_duration_ms: int?
+  # --- 🔍 Debug ---
+  enable_recording: bool
+  qwen_tool_debug: bool
+  qwen_tool_timeout_seconds: int(1,60)
+# No `image:` key -> Home Assistant builds the add-on locally from the
+# Dockerfile in this directory (see build.yaml). This makes the fork work
+# without publishing images to a registry. Advanced users who prefer fast
+# installs can publish via the included GitHub Actions workflow and set:
+#   image: ghcr.io/haipeiwang/ha-qwen-realtime-voice-agent/openai-realtime-voice-agent-{arch}

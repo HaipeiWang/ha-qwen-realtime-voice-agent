@@ -1,0 +1,97 @@
+configuration:
+  qwen_api_key:
+    name: "🔑 千问 · API Key"
+    description: "用于千问 Omni Realtime 的百炼 / DashScope API Key。修改后保存并重启 Add-on 生效。"
+  qwen_workspace_id:
+    name: "🔑 千问 · Workspace ID"
+    description: "必填。请输入你自己的百炼工作空间 ID，供原生 Realtime WebSocket 使用。"
+  qwen_region:
+    name: "🔑 千问 · 地域"
+    description: "工作空间所在地域，例如 cn-beijing；必须与 Workspace ID 所在地域一致。"
+  instructions:
+    name: "🔑 助手 · 系统提示词"
+    description: "定义人设、语言和家庭规则。长文本建议通过配置菜单的“以 YAML 编辑”。"
+  transcription_language:
+    name: "🔑 助手 · 语音语言"
+    description: "可选 ISO 语言代码，例如 zh、en、nl；留空则由千问自动识别。"
+  qwen_model:
+    name: "🗣️ 千问 · Realtime 模型"
+    description: "原生千问 Omni Realtime 模型；仅在账户支持其他模型时选择 custom。"
+  qwen_model_custom:
+    name: "🗣️ 千问 · 自定义模型"
+    description: "仅当 Realtime 模型选择 custom 时使用。"
+  qwen_voice:
+    name: "🗣️ 千问 · 音色"
+    description: "千问语音输出音色；修改后需要重启 Add-on。"
+  qwen_voice_custom:
+    name: "🗣️ 千问 · 自定义音色"
+    description: "仅当音色选择 custom 时使用。"
+  openai_speed:
+    name: "🗣️ 千问 · 播放速度"
+    description: "1.0 为正常速度；更低更慢、更高更快。底层 YAML 旧字段为兼容已有配置而保留。"
+  max_output_tokens:
+    name: "🗣️ 千问 · 最大回复长度"
+    description: "0 表示使用服务商默认限制。回复过长时可设定上限。"
+  follow_up_listen_seconds:
+    name: "💬 对话 · 连续对话监听时长"
+    description: "回复后 Voice PE 继续监听的秒数；0 为关闭连续对话。"
+  follow_up_open_delay_ms:
+    name: "💬 对话 · 回复后开麦延迟"
+    description: "回复结束后再开启麦克风的等待时间，用于降低扬声器回声和抢答。"
+  wake_open_delay_ms:
+    name: "💬 对话 · 唤醒后开麦延迟"
+    description: "唤醒音播放后等待再开麦，避免唤醒音回声被当作指令。"
+  vad_eagerness:
+    name: "💬 对话 · 语句结束灵敏度"
+    description: "low 会更耐心等待；high 回复更快，但停顿时可能更容易截断。"
+  phase_idle_debounce_ms:
+    name: "💬 对话 · 回复结束保持时间"
+    description: "静音多久后 Voice PE 进入空闲状态。"
+  enable_web_search:
+    name: "🌐 网络搜索 · 千问工具模式不可用"
+    description: "请保持关闭。千问原生 Realtime 中，Home Assistant 工具调用与网络搜索不能同时启用。"
+  playback_prebuffer_ms:
+    name: "🎚️ 音频 · 播放预缓冲"
+    description: "Voice PE 开始播放前积累的音频量；增大可缓冲 Wi‑Fi 抖动，减小可更快开口。"
+  noise_reduction:
+    name: "🎚️ 音频 · 麦克风降噪"
+    description: "发送给千问前的可选输入降噪。"
+  ha_mcp_url:
+    name: "🏠 Home Assistant · MCP 服务地址"
+    description: "留空即可使用 Home Assistant 内置 MCP Server。"
+  longlived_token:
+    name: "🏠 Home Assistant · 访问令牌"
+    description: "内置 MCP 保持留空；仅外部 MCP 服务明确要求时填写。"
+  mcp_tool_allowlist:
+    name: "🏠 Home Assistant · 工具白名单"
+    description: "暴露给千问的工具名称，逗号分隔。默认包含设备查询、开灯、关灯和调光。"
+  auto_tool_generation:
+    name: "🏠 Home Assistant · 自动生成设备工具"
+    description: "启动时根据已暴露给 Assist 的实体能力生成额外工具，例如空调模式、风速、摆风、净化器预设和 select 选项。"
+  auto_tool_capabilities:
+    name: "🏠 Home Assistant · 自动工具能力列表"
+    description: "逗号分隔：climate_mode、climate_fan、climate_swing、fan_preset、select_option；留空表示启用所有已发现能力。"
+  websocket_port:
+    name: "⚙️ 高级 · Voice PE WebSocket 端口"
+    description: "必须与 Voice PE 自定义固件中的端口一致。"
+  session_reuse_timeout_seconds:
+    name: "⚙️ 高级 · 会话恢复窗口"
+    description: "设备短暂断线后可复用上下文的秒数。"
+  max_context_messages:
+    name: "⚙️ 高级 · 对话记忆长度"
+    description: "本地上下文中保留的最近消息数量。"
+  transcription_model:
+    name: "⚙️ 高级 · 转写模型"
+    description: "仅用于诊断日志的千问 ASR 模型，不替代原生语音理解。"
+  turn_detection_type:
+    name: "⚙️ 高级 · 轮次检测"
+    description: "推荐 semantic_vad；server_vad 是基于静音计时的兼容模式。"
+  enable_recording:
+    name: "🔍 调试 · 录制音频"
+    description: "将麦克风和扬声器音频保存到 Add-on 内，正常使用请关闭。"
+  qwen_tool_debug:
+    name: "🔍 调试 · 千问工具协议日志"
+    description: "记录工具注册和原生 function-call 事件，正常使用请关闭。"
+  qwen_tool_timeout_seconds:
+    name: "🔍 调试 · MCP 工具超时"
+    description: "等待 Home Assistant MCP 工具返回的最长秒数。"

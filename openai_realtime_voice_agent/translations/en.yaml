@@ -1,0 +1,116 @@
+# User-facing Configuration tab labels for the native Qwen Realtime add-on.
+configuration:
+  qwen_api_key:
+    name: "🔑 Qwen · API key"
+    description: "DashScope / Model Studio API key used for Qwen Omni Realtime. Save, then restart the add-on to apply a changed key."
+  qwen_workspace_id:
+    name: "🔑 Qwen · Workspace ID"
+    description: "Required. Enter your own Model Studio workspace ID for the native Realtime WebSocket endpoint."
+  qwen_region:
+    name: "🔑 Qwen · Region"
+    description: "Model Studio region in the endpoint, for example cn-beijing. Must match the workspace region."
+  instructions:
+    name: "🔑 Assistant · System instructions"
+    description: "Persona, spoken language and house rules. For long edits use the Configuration menu → Edit in YAML."
+  transcription_language:
+    name: "🔑 Assistant · Spoken language"
+    description: "Optional ISO language code, for example zh, en or nl. Empty lets Qwen detect the language."
+  qwen_model:
+    name: "🗣️ Qwen · Realtime model"
+    description: "Native Qwen Omni Realtime model. Choose custom only when your Model Studio account has a different supported model."
+  qwen_model_custom:
+    name: "🗣️ Qwen · Custom model"
+    description: "Used only when Realtime model is set to custom."
+  qwen_voice:
+    name: "🗣️ Qwen · Voice"
+    description: "Qwen output voice. Restart the add-on after changing it."
+  qwen_voice_custom:
+    name: "🗣️ Qwen · Custom voice"
+    description: "Used only when Voice is set to custom."
+  openai_speed:
+    name: "🗣️ Qwen · Playback speed"
+    description: "Speech playback rate: 1.0 is normal; lower is slower and higher is faster. The legacy YAML key is retained for compatibility."
+  max_output_tokens:
+    name: "🗣️ Qwen · Maximum response length"
+    description: "0 means provider default. Limit this if replies become too long."
+  follow_up_listen_seconds:
+    name: "💬 Conversation · Follow-up listening"
+    description: "How long Voice PE keeps listening after an answer. 0 disables follow-up mode."
+  follow_up_open_delay_ms:
+    name: "💬 Conversation · Follow-up microphone delay"
+    description: "Delay before reopening the microphone after speech, reducing speaker echo and false follow-up turns."
+  wake_open_delay_ms:
+    name: "💬 Conversation · Wake microphone delay"
+    description: "Delay after the wake chime before listening, reducing wake-chime echo."
+  vad_eagerness:
+    name: "💬 Conversation · End-of-turn sensitivity"
+    description: "low waits longer for you to finish; high replies faster but can cut off pauses."
+  phase_idle_debounce_ms:
+    name: "💬 Conversation · End-of-reply hold"
+    description: "Silence duration required before Voice PE returns to idle."
+  enable_web_search:
+    name: "🌐 Web search · Unavailable with Qwen tools"
+    description: "Keep off. Native Qwen Realtime cannot use Home Assistant function tools and web search in the same session."
+  web_search_model:
+    name: "🌐 Web search · Legacy option"
+    description: "Not used by the native Qwen Realtime configuration."
+  web_search_model_custom:
+    name: "🌐 Web search · Legacy custom option"
+    description: "Not used by the native Qwen Realtime configuration."
+  playback_prebuffer_ms:
+    name: "🎚️ Audio · Playback buffer"
+    description: "Audio collected before Voice PE begins playback. Raise slightly for Wi-Fi jitter; lower for faster starts."
+  noise_reduction:
+    name: "🎚️ Audio · Microphone noise reduction"
+    description: "Optional input filtering before audio reaches Qwen."
+  ha_mcp_url:
+    name: "🏠 Home Assistant · MCP server URL"
+    description: "Leave empty to use Home Assistant's built-in MCP Server endpoint."
+  longlived_token:
+    name: "🏠 Home Assistant · Access token"
+    description: "Leave empty to use the add-on permission. Use only when an external MCP endpoint requires a token."
+  mcp_tool_allowlist:
+    name: "🏠 Home Assistant · Tool allow-list"
+    description: "Comma-separated function names exposed to Qwen. The default keeps entity lookup plus light on, off and set functions."
+  auto_tool_generation:
+    name: "🏠 Home Assistant · Auto tool generation"
+    description: "Automatically discover device capabilities and expose extra tools (AC mode/fan/swing, fan preset, select option) to Qwen. On by default."
+  auto_tool_capabilities:
+    name: "🏠 Home Assistant · Enabled capability tools"
+    description: "Comma-separated capability ids to generate: climate_mode, climate_fan, climate_swing, fan_preset, select_option. Empty = all discovered."
+  websocket_port:
+    name: "⚙️ Advanced · Voice PE WebSocket port"
+    description: "Must match the custom Voice PE firmware configuration."
+  session_reuse_timeout_seconds:
+    name: "⚙️ Advanced · Conversation resume window"
+    description: "How long a reconnect can reuse the previous conversation context."
+  max_context_messages:
+    name: "⚙️ Advanced · Conversation memory"
+    description: "Number of recent messages retained in the local context."
+  transcription_model:
+    name: "⚙️ Advanced · Transcript model"
+    description: "Qwen ASR model used for diagnostic transcripts. It does not replace native audio understanding."
+  transcription_model_custom:
+    name: "⚙️ Advanced · Custom transcript model"
+    description: "Optional custom ASR model identifier."
+  turn_detection_type:
+    name: "⚙️ Advanced · Turn detection"
+    description: "semantic_vad is recommended. server_vad is a legacy silence-timer fallback."
+  vad_threshold:
+    name: "⚙️ Advanced · server_vad threshold"
+    description: "Only for server_vad. Higher values reject more background noise."
+  vad_prefix_padding_ms:
+    name: "⚙️ Advanced · server_vad lead-in"
+    description: "Only for server_vad. Audio retained before speech is detected."
+  vad_silence_duration_ms:
+    name: "⚙️ Advanced · server_vad silence duration"
+    description: "Only for server_vad. Silence needed to end a turn."
+  enable_recording:
+    name: "🔍 Debug · Record audio"
+    description: "Saves microphone and speaker audio inside the add-on for troubleshooting. Leave off normally."
+  qwen_tool_debug:
+    name: "🔍 Debug · Qwen tool protocol logs"
+    description: "Logs tool registration and native Qwen function events. Disable during normal use."
+  qwen_tool_timeout_seconds:
+    name: "🔍 Debug · MCP tool timeout"
+    description: "Maximum time to wait for a Home Assistant MCP tool before returning a safe error."

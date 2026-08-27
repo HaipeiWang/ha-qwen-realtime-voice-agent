@@ -1,0 +1,98 @@
+name: Build and Publish Home Assistant Addon
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'openai_realtime_voice_agent/**'
+      - '.github/workflows/build-addon.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - 'openai_realtime_voice_agent/**'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: haipeiwang/ha-qwen-realtime-voice-agent/openai-realtime-voice-agent
+
+jobs:
+  build:
+    name: Build for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64
+          - amd64
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from config.yaml
+        id: version
+        run: |
+          VERSION=$(grep '^version:' openai_realtime_voice_agent/config.yaml | sed 's/version: "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64,linux/amd64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Map architecture
+        id: arch-map
+        run: |
+          case "${{ matrix.arch }}" in
+            aarch64)
+              echo "platform=linux/arm64" >> $GITHUB_OUTPUT
+              ;;
+            amd64)
+              echo "platform=linux/amd64" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./openai_realtime_voice_agent
+          file: ./openai_realtime_voice_agent/Dockerfile
+          platforms: ${{ steps.arch-map.outputs.platform }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}:${{ steps.version.outputs.version }}-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base-debian:bookworm
+
+      - name: Generate image manifest
+        if: github.event_name != 'pull_request' && matrix.arch == 'amd64'
+        run: |
+          echo "Image built: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.arch }}:${{ steps.version.outputs.version }}"

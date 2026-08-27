@@ -1,0 +1,12 @@
+{
+  "name": "Qwen Omni Realtime Voice Agent (Home Assistant Voice PE)",
+  "url": "https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent",
+  "maintainer": "HaipeiWang",
+  "addons": [
+    {
+      "slug": "openai_realtime_voice_agent",
+      "name": "Qwen Omni Realtime Voice Agent",
+      "version": "0.9.0"
+    }
+  ]
+}
