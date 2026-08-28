@@ -448,6 +448,14 @@ class Application:
         except (TypeError, ValueError):
             wake_open_delay_ms = 700
         wake_open_delay_ms = max(0, min(5000, wake_open_delay_ms))
+        try:
+            wake_audio_guard_ms = int(os.environ.get("WAKE_AUDIO_GUARD_MS", "600"))
+        except (TypeError, ValueError):
+            wake_audio_guard_ms = 600
+        # The device does not intentionally open its mic before
+        # wake_open_delay_ms. Clamping the backend guard to that delay prevents
+        # a typo from dropping a user's first real word.
+        wake_audio_guard_ms = max(0, min(wake_audio_guard_ms, wake_open_delay_ms))
         # Playback jitter buffer (ms): the device holds incoming TTS until this
         # much has accumulated before playing, so a brief network hiccup doesn't
         # dry out the speaker chain mid-word (audible crackle). Sent in `hello`.
@@ -536,6 +544,7 @@ class Application:
             follow_up_ms=follow_up_ms,
             follow_up_open_delay_ms=follow_up_open_delay_ms,
             wake_open_delay_ms=wake_open_delay_ms,
+            wake_audio_guard_ms=wake_audio_guard_ms,
             playback_prebuffer_ms=playback_prebuffer_ms,
         )
         logger.info(
@@ -543,6 +552,7 @@ class Application:
             f"({'enabled' if follow_up_ms > 0 else 'disabled — turn-based'}), "
             f"mic-open delay {follow_up_open_delay_ms}ms, "
             f"wake-open delay {wake_open_delay_ms}ms, "
+            f"wake audio guard {wake_audio_guard_ms}ms, "
             f"playback prebuffer {playback_prebuffer_ms}ms"
         )
         self.websocket_transport = self.websocket_handler.create_transport()

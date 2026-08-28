@@ -42,6 +42,9 @@ configuration:
   wake_open_delay_ms:
     name: "💬 Conversation · Wake microphone delay"
     description: "Delay after the wake chime before listening, reducing wake-chime echo."
+  wake_audio_guard_ms:
+    name: "💬 Conversation · Wake audio guard"
+    description: "Backend protection after each wake. It drops queued chime-tail audio before Qwen may detect speech. Keep below the wake microphone delay."
   vad_eagerness:
     name: "💬 Conversation · End-of-turn sensitivity"
     description: "low waits longer for you to finish; high replies faster but can cut off pauses."

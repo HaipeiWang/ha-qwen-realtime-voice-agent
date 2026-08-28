@@ -51,6 +51,7 @@ MAX_OUTPUT_TOKENS=$(config_value 'max_output_tokens')
 FOLLOW_UP_LISTEN_SECONDS=$(config_value 'follow_up_listen_seconds')
 FOLLOW_UP_OPEN_DELAY_MS=$(config_value 'follow_up_open_delay_ms')
 WAKE_OPEN_DELAY_MS=$(config_value 'wake_open_delay_ms')
+WAKE_AUDIO_GUARD_MS=$(config_value 'wake_audio_guard_ms')
 VAD_EAGERNESS=$(config_value 'vad_eagerness')
 PHASE_IDLE_DEBOUNCE_MS=$(config_value 'phase_idle_debounce_ms')
 
@@ -103,6 +104,7 @@ export MAX_OUTPUT_TOKENS
 export FOLLOW_UP_LISTEN_SECONDS
 export FOLLOW_UP_OPEN_DELAY_MS
 export WAKE_OPEN_DELAY_MS
+export WAKE_AUDIO_GUARD_MS
 export VAD_EAGERNESS
 export PHASE_IDLE_DEBOUNCE_MS
 export ENABLE_WEB_SEARCH

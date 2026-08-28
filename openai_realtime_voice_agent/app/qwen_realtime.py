@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import os
+import time
 import uuid
 from types import SimpleNamespace
 
@@ -143,6 +144,12 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         self.control_router: Optional[ControlIntentRouter] = None
         self._last_user_transcript = ""
         self._transcript_gate_task = None
+        # Every Voice PE wake is an input generation. A delayed VAD stop or
+        # transcription from the previous wake must never be allowed to consume
+        # the next turn's model response slot or deterministic control router.
+        self._turn_generation = 0
+        self._speech_started_generation = None
+        self._wake_guard_until = 0.0
         self._det_confirm_pending = False
         # Maps tool_name -> cached MCP result for the current turn, populated
         # after the deterministic router executes a tool locally.  Used to
@@ -547,6 +554,29 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         if task and not task.done():
             task.cancel()
         self._transcript_gate_task = None
+
+    def begin_wake_turn(self, guard_ms: int = 0):
+        """Start a hard input generation boundary for a device wake.
+
+        This does not reset the Qwen conversation history. It only discards
+        local, not-yet-committed turn state so late events from the previous
+        microphone segment cannot answer the next wake with an old request.
+        """
+        self._turn_generation += 1
+        self._speech_started_generation = None
+        self._wake_guard_until = time.monotonic() + max(0, guard_ms) / 1000.0
+        self._last_user_transcript = ""
+        self._tool_call_seen_for_turn = False
+        self._det_executed_results.clear()
+        self._cancel_transcript_gate()
+        logger.info(
+            "Qwen wake generation=%u started; VAD guard=%ums",
+            self._turn_generation,
+            max(0, guard_ms),
+        )
+
+    def _wake_guard_active(self) -> bool:
+        return time.monotonic() < self._wake_guard_until
 
     async def _on_speech_stopped(self):
         """Route the just-finished turn, waiting briefly for the final transcript."""
@@ -1004,6 +1034,13 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                 self._run_llm_when_api_session_ready = False
                 await self._create_response()
         elif kind == "input_audio_buffer.speech_started":
+            if self._wake_guard_active():
+                logger.info(
+                    "Dropped speech_started in wake guard: generation=%u",
+                    self._turn_generation,
+                )
+                return
+            self._speech_started_generation = self._turn_generation
             self._tool_call_seen_for_turn = False
             self._last_user_transcript = ""
             self._det_executed_results.clear()
@@ -1026,6 +1063,13 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                 await self.push_interruption_task_frame_and_wait()
             await self.push_frame(UserStartedSpeakingFrame())
         elif kind == "input_audio_buffer.speech_stopped":
+            if self._speech_started_generation != self._turn_generation:
+                logger.warning(
+                    "Dropped orphan speech_stopped: generation=%u, started_generation=%s",
+                    self._turn_generation,
+                    self._speech_started_generation,
+                )
+                return
             await self.start_ttfb_metrics()
             await self.start_processing_metrics()
             await self.push_frame(UserStoppedSpeakingFrame())
@@ -1038,6 +1082,13 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         elif kind == "conversation.item.input_audio_transcription.completed":
             transcript = event.get("transcript", "")
             if transcript:
+                if self._speech_started_generation != self._turn_generation:
+                    logger.warning(
+                        "Dropped stale transcript outside active wake generation=%u: %r",
+                        self._turn_generation,
+                        transcript[:120],
+                    )
+                    return
                 self._last_user_transcript = transcript
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), result=event),

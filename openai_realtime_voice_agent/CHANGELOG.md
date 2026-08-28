@@ -2,6 +2,19 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.9.1
+
+### Fixed
+
+- Treat every Voice PE `wake` message as a hard input-generation boundary:
+  clear the uncommitted Qwen audio buffer, cancel a pending transcript gate,
+  and discard the prior turn's candidate transcript without resetting normal
+  conversation memory.
+- Reject microphone PCM during a configurable post-wake guard and reject orphan
+  Qwen VAD/transcript events unless the current wake generation first received
+  a valid `speech_started`. This prevents chime tails and delayed packets from
+  answering a previous request.
+
 ## 0.9.0
 
 ### Automatic Home Assistant capability tools

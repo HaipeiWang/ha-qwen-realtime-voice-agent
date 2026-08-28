@@ -114,6 +114,25 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_wake_generation_discards_only_uncommitted_turn_state(self):
+        service = object.__new__(QwenRealtimeLLMService)
+        service._turn_generation = 7
+        service._speech_started_generation = 7
+        service._wake_guard_until = 0.0
+        service._last_user_transcript = "上一轮的请求"
+        service._tool_call_seen_for_turn = True
+        service._det_executed_results = {"HassTurnOn": "old-result"}
+        service._transcript_gate_task = None
+
+        service.begin_wake_turn(0)
+
+        self.assertEqual(service._turn_generation, 8)
+        self.assertIsNone(service._speech_started_generation)
+        self.assertEqual(service._last_user_transcript, "")
+        self.assertFalse(service._tool_call_seen_for_turn)
+        self.assertEqual(service._det_executed_results, {})
+        self.assertFalse(service._wake_guard_active())
+
     def test_session_echo_rejects_duplicate_or_unregistered_local_handler(self):
         service = object.__new__(QwenRealtimeLLMService)
         service._expected_tool_names = {"HassTurnOn", "HassTurnOff"}

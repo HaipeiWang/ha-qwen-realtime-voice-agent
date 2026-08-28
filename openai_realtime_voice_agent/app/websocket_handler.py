@@ -387,6 +387,7 @@ class WebSocketHandler:
         follow_up_ms: int = 0,
         follow_up_open_delay_ms: int = 700,
         wake_open_delay_ms: int = 700,
+        wake_audio_guard_ms: int = 600,
         playback_prebuffer_ms: int = 0,
     ):
         """
@@ -406,6 +407,9 @@ class WebSocketHandler:
             wake_open_delay_ms: How long (ms) the device waits after the wake
                 chime before opening the mic, so the chime's hardware tail can't
                 leak into the fresh mic as a ghost turn. Sent in `hello`.
+            wake_audio_guard_ms: How long the backend rejects binary PCM and
+                VAD events after a wake. This is an independent hard boundary
+                for packets already queued ahead of the device control frame.
         """
         self.host = host
         self.port = port
@@ -414,6 +418,7 @@ class WebSocketHandler:
         self.follow_up_ms = max(0, int(follow_up_ms))
         self.follow_up_open_delay_ms = max(0, int(follow_up_open_delay_ms))
         self.wake_open_delay_ms = max(0, int(wake_open_delay_ms))
+        self.wake_audio_guard_ms = max(0, int(wake_audio_guard_ms))
         self.playback_prebuffer_ms = max(0, int(playback_prebuffer_ms))
 
         self.transport: Optional[WebsocketServerTransport] = None
@@ -441,6 +446,7 @@ class WebSocketHandler:
         # with the device mic rate (16 kHz for Voice PE); the transport
         # resamples in/out to the 24 kHz pipeline rate below.
         serializer = RawAudioSerializer()
+        serializer.set_wake_audio_guard_ms(self.wake_audio_guard_ms)
         self._serializer = serializer
         # Bind diagnostics before WebsocketServerParams receives the serializer.
         # Some transport versions copy/freeze params at construction time; late
@@ -778,6 +784,22 @@ class WebSocketHandler:
             # reordered interrupt without ever concatenating two responses.
             await paced_audio_sender.reset("device wake")
             phase_emitter.note_wake()
+            # Make wake a real upstream generation boundary. The service drops
+            # any late VAD/transcript events from the old generation before we
+            # clear the provider's uncommitted PCM buffer.
+            begin_wake_turn = getattr(openai_service, "begin_wake_turn", None)
+            if begin_wake_turn is not None:
+                begin_wake_turn(self.wake_audio_guard_ms)
+            try:
+                await openai_service.send_client_event(
+                    openai_rt_events.InputAudioBufferClearEvent()
+                )
+                logger.info(
+                    "👋 device wake → input_audio_buffer.clear sent; guard=%ums",
+                    self.wake_audio_guard_ms,
+                )
+            except Exception as e:
+                logger.warning("👋 wake input clear failed: %r", e)
             # New turn boundary: drop any pending post-tool kill so it can't
             # leak onto this fresh turn's response.
             _kill_next_response["v"] = False

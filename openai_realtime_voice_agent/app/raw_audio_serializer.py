@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import time
 from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, Frame
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -59,6 +60,18 @@ class RawAudioSerializer(FrameSerializer):
         self._output_hook_logged = False
         # Diagnostic counter for incoming binary (mic audio) frames.
         self._binary_frames_received = 0
+        # A wake is a hard audio-generation boundary. The device sends its
+        # control frame before it enables capture, but a previous websocket
+        # packet can already be in flight. Reject early binary packets so a
+        # chime tail cannot become the first VAD segment of the new turn.
+        self._wake_audio_guard_ms = 0
+        self._wake_audio_guard_until = 0.0
+        self._wake_generation = 0
+        self._wake_first_pcm_logged = False
+
+    def set_wake_audio_guard_ms(self, guard_ms: int):
+        """Set the backend PCM rejection window after each device wake."""
+        self._wake_audio_guard_ms = max(0, int(guard_ms))
 
     def set_interrupt_handler(self, handler):
         """Register the async no-arg callback fired on a device 'interrupt'."""
@@ -145,6 +158,16 @@ class RawAudioSerializer(FrameSerializer):
                 # actually speaks, any server-VAD end-of-turn is a stale segment
                 # from the previous turn closing late (→ garbage response).
                 logger.info("👋 device wake received")
+                self._wake_generation += 1
+                self._wake_first_pcm_logged = False
+                self._wake_audio_guard_until = (
+                    time.monotonic() + self._wake_audio_guard_ms / 1000.0
+                )
+                logger.info(
+                    "🛡️ wake generation=%u; rejecting device PCM for %ums",
+                    self._wake_generation,
+                    self._wake_audio_guard_ms,
+                )
                 if self._on_wake is not None:
                     try:
                         await self._on_wake()
@@ -156,6 +179,21 @@ class RawAudioSerializer(FrameSerializer):
         if not isinstance(message, bytes):
             # Skip anything that isn't bytes or a known text control frame.
             return None
+
+        guard_remaining = self._wake_audio_guard_until - time.monotonic()
+        if guard_remaining > 0:
+            logger.debug(
+                "Dropping %u-byte device PCM in wake guard (generation=%u, %.0fms left)",
+                len(message), self._wake_generation, guard_remaining * 1000,
+            )
+            return None
+
+        if self._wake_generation and not self._wake_first_pcm_logged:
+            self._wake_first_pcm_logged = True
+            logger.info(
+                "🎙️ first device PCM accepted for wake generation=%u",
+                self._wake_generation,
+            )
 
         # DIAGNOSTIC: confirm the backend is actually receiving the device's
         # raw PCM mic frames (binary). Log the first few, then every 100th.
