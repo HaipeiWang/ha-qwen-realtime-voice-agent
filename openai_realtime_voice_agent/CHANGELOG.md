@@ -2,6 +2,20 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.9.2
+
+### Added
+
+- The Configuration page's Realtime model selector now offers Qwen-Audio 3.0
+  Flash/Plus and Qwen 3.5 Omni Flash/Plus. New installations default to
+  `qwen-audio-3.0-realtime-flash`.
+
+### Changed
+
+- Qwen-Audio models now use their documented smart-turn, PCM session profile
+  and system voices, while Omni models retain their existing manual-response
+  profile. A saved Omni Tina/Ethan voice maps safely to Audio's longanqian.
+
 ## 0.9.1
 
 ### Fixed

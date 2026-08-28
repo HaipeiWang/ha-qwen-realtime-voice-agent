@@ -16,13 +16,13 @@ configuration:
     description: "可选 ISO 语言代码，例如 zh、en、nl；留空则由千问自动识别。"
   qwen_model:
     name: "🗣️ 千问 · Realtime 模型"
-    description: "原生千问 Omni Realtime 模型；仅在账户支持其他模型时选择 custom。"
+    description: "下拉选择 Qwen-Audio 或 Qwen Omni Realtime。Audio Flash 适合低成本语音助手；Omni Plus 支持联网搜索（联网搜索不能与 HA 工具同时开启）。"
   qwen_model_custom:
     name: "🗣️ 千问 · 自定义模型"
     description: "仅当 Realtime 模型选择 custom 时使用。"
   qwen_voice:
     name: "🗣️ 千问 · 音色"
-    description: "千问语音输出音色；修改后需要重启 Add-on。"
+    description: "Qwen-Audio 使用 longan* 音色；Qwen Omni 使用 Tina/Ethan。切换模型时，旧的 Tina/Ethan 会自动兼容为 longanqian。"
   qwen_voice_custom:
     name: "🗣️ 千问 · 自定义音色"
     description: "仅当音色选择 custom 时使用。"

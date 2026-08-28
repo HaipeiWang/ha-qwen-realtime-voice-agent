@@ -44,12 +44,27 @@ Voice PE custom firmware               Home Assistant OS Add-on
 
 - Home Assistant OS with access to the Add-on Store.
 - A Home Assistant Voice PE running the companion custom firmware.
-- An Alibaba Cloud Model Studio workspace with access to a supported Qwen Omni
+- An Alibaba Cloud Model Studio workspace with access to a supported Qwen
   Realtime model, plus your own API key and Workspace ID.
 - The Home Assistant **Model Context Protocol Server** integration.
 
 No API key, Workspace ID, Home Assistant token, Wi-Fi credential, device
 address, recording, or user-specific entity data is included in this repository.
+
+## Realtime model selector
+
+The Add-on Configuration page exposes these native WebSocket models:
+
+| Model | Intended test | Home Assistant tools | Web search |
+| --- | --- | --- | --- |
+| `qwen-audio-3.0-realtime-flash` | Low-cost speech assistant (default) | Yes | No |
+| `qwen-audio-3.0-realtime-plus` | Higher-quality speech assistant | Yes | No |
+| `qwen3.5-omni-flash-realtime` | Fast multimodal voice assistant | Yes | Yes* |
+| `qwen3.5-omni-plus-realtime` | Highest-quality multimodal assistant | Yes | Yes* |
+
+\* Qwen does not allow web search and function tools in the same session. Keep
+Home Assistant tools enabled for device control; use a separate search-only
+configuration when testing Omni web search.
 
 ## Install the Add-on
 

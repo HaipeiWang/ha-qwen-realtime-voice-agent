@@ -362,8 +362,8 @@ class Application:
         # Qwen Realtime model + voice. These are dropdowns in the add-on UI with
         # a "custom" sentinel + a sibling *_CUSTOM free-text field; _resolve_choice
         # returns the custom value when the dropdown is "custom", else the dropdown.
-        openai_model = _resolve_choice("QWEN_MODEL", "QWEN_MODEL_CUSTOM", "qwen3.5-omni-flash-realtime")
-        openai_voice = _resolve_choice("QWEN_VOICE", "QWEN_VOICE_CUSTOM", "Tina")
+        openai_model = _resolve_choice("QWEN_MODEL", "QWEN_MODEL_CUSTOM", "qwen-audio-3.0-realtime-flash")
+        openai_voice = _resolve_choice("QWEN_VOICE", "QWEN_VOICE_CUSTOM", "longanqian")
 
         # Playback speed (post-generation rate): 0.25-1.5, 1.0 = normal. Clamped.
         try:

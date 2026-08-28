@@ -38,12 +38,26 @@ Voice PE 定制固件                       Home Assistant OS Add-on
 
 - 能够访问 Add-on Store 的 Home Assistant OS。
 - 一台刷入配套定制固件的 Home Assistant Voice PE。
-- 已开通受支持 Qwen Omni Realtime 模型的阿里云百炼工作空间，以及你自己的 API Key
+- 已开通受支持 Qwen Realtime 模型的阿里云百炼工作空间，以及你自己的 API Key
   和 Workspace ID。
 - Home Assistant 的 **Model Context Protocol Server** 集成。
 
 本仓库不包含任何 API Key、Workspace ID、Home Assistant 令牌、Wi-Fi 凭据、设备地址、
 录音或用户实体数据。
+
+## Realtime 模型下拉菜单
+
+Add-on 的配置页面提供以下原生 WebSocket 模型：
+
+| 模型 | 推荐测试用途 | Home Assistant 工具 | 联网搜索 |
+| --- | --- | --- | --- |
+| `qwen-audio-3.0-realtime-flash` | 低成本语音助手（默认） | 支持 | 不支持 |
+| `qwen-audio-3.0-realtime-plus` | 更高质量语音助手 | 支持 | 不支持 |
+| `qwen3.5-omni-flash-realtime` | 快速全模态语音助手 | 支持 | 支持* |
+| `qwen3.5-omni-plus-realtime` | 最高质量全模态助手 | 支持 | 支持* |
+
+\* 千问不能在同一会话同时启用联网搜索和 Function Calling。控制设备时请保持
+Home Assistant 工具开启；测试 Omni 联网搜索时请使用独立的“仅搜索”配置。
 
 ## 安装 Add-on
 

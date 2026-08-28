@@ -111,6 +111,12 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             session_properties=session_properties,
             **kwargs,
         )
+        self._qwen_model = model
+        # Qwen-Audio has the same event flow as Qwen Omni Realtime, but its
+        # session fields and smart-turn behavior are intentionally different.
+        # Keep the distinction local to this adapter so the Pipecat/MCP shape
+        # and the Voice PE protocol do not fork by model.
+        self._provider_auto_response = self._is_qwen_audio_realtime_model(model)
         self._tool_debug = os.getenv("QWEN_TOOL_DEBUG", "false").strip().lower() == "true"
         try:
             self._tool_timeout_s = max(
@@ -176,6 +182,23 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         if hasattr(value, "model_dump"):
             return value.model_dump(exclude_none=True)
         return value
+
+    @staticmethod
+    def _is_qwen_audio_realtime_model(model: str) -> bool:
+        return str(model or "").startswith("qwen-audio-3.0-realtime-")
+
+    @staticmethod
+    def _audio_realtime_voice(requested_voice: str | None) -> str:
+        """Return an Audio-Realtime-compatible voice without breaking saves.
+
+        Existing installations commonly saved Omni's ``Tina`` or ``Ethan``.
+        Those names are not valid Qwen-Audio system voices, so map them to the
+        documented Audio default while preserving all Audio voices/custom IDs.
+        """
+        voice = str(requested_voice or "").strip()
+        if voice in ("", "Tina", "Ethan"):
+            return "longanqian"
+        return voice
 
     @classmethod
     def _to_qwen_tool(cls, value):
@@ -362,8 +385,9 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         audio_output = getattr(audio, "output", None)
         turn = getattr(audio_input, "turn_detection", None)
 
-        turn_payload = {"type": "semantic_vad"}
-        if turn:
+        is_qwen_audio = self._provider_auto_response
+        turn_payload = {"type": "smart_turn"} if is_qwen_audio else {"type": "semantic_vad"}
+        if turn and not is_qwen_audio:
             turn_type = getattr(turn, "type", None)
             if turn_type:
                 turn_payload["type"] = str(turn_type)
@@ -377,13 +401,12 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             if silence_duration_ms is not None:
                 turn_payload["silence_duration_ms"] = silence_duration_ms
 
-        # Native probe evidence: with identical audio, model and four tools,
-        # Qwen's server-VAD auto-created response spoke a false success while an
-        # explicit response.create emitted HassTurnOff with correct arguments.
-        # Keep provider VAD for speech boundaries, but let this bridge create
-        # each response explicitly after speech_stopped.
-        turn_payload["create_response"] = False
-        turn_payload["interrupt_response"] = False
+        if not is_qwen_audio:
+            # Qwen Omni remains on bridge-created responses. Its historic
+            # server-VAD auto-response could speak a false tool success before
+            # the MCP result was available.
+            turn_payload["create_response"] = False
+            turn_payload["interrupt_response"] = False
 
         raw_tools = list(getattr(settings, "tools", None) or [])
         qwen_tools = []
@@ -416,6 +439,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         effective_instructions = self._session_instructions
         if extra_instructions:
             effective_instructions = f"{effective_instructions}\n\n{extra_instructions}"
+        requested_voice = getattr(audio_output, "voice", None) or "Tina"
         session = {
             "modalities": ["text", "audio"],
             # The generic inherited OpenAI prompt only says that the assistant
@@ -423,26 +447,38 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             # making a function call. This provider-neutral policy makes real
             # HA control a required precondition for a success confirmation.
             "instructions": effective_instructions,
-            "voice": getattr(audio_output, "voice", None) or "Tina",
-            # Qwen 3.5 Realtime still accepts the legacy format fields, but
-            # its documented form also declares the sample rates.  Omitting
-            # them made an otherwise successful session return transcript-only
-            # responses in this bridge on some requests.
-            "audio": {
-                "input": {"format": {"type": "pcm", "sample_rate": 16000}},
-                "output": {"format": {"type": "pcm", "sample_rate": 24000}},
-            },
-            "input_audio_transcription": {"model": "qwen3-asr-flash-realtime"},
+            "voice": (
+                self._audio_realtime_voice(requested_voice)
+                if is_qwen_audio else requested_voice
+            ),
             "turn_detection": turn_payload,
             "tools": qwen_tools,
         }
+        if is_qwen_audio:
+            # Qwen-Audio Realtime has fixed PCM16 16 kHz input / 24 kHz output
+            # and documents the legacy format fields. Its smart_turn owns the
+            # response boundary, so no Omni-only audio object or ASR option is
+            # sent.
+            session["input_audio_format"] = "pcm"
+            session["output_audio_format"] = "pcm"
+            session["max_history_turns"] = 50
+        else:
+            # Qwen Omni Realtime supports explicit sample-rate configuration.
+            session["audio"] = {
+                "input": {"format": {"type": "pcm", "sample_rate": 16000}},
+                "output": {"format": {"type": "pcm", "sample_rate": 24000}},
+            }
+            session["input_audio_transcription"] = {
+                "model": "qwen3-asr-flash-realtime"
+            }
         max_tokens = getattr(settings, "max_output_tokens", None)
         if max_tokens:
             session["max_tokens"] = max_tokens
         logger.info(
-            "Qwen session.update: input=pcm/16000 output=pcm/24000, "
-            "modalities=%s, tools=%u, vad=%s",
-            session["modalities"], len(session["tools"]), turn_payload,
+            "Qwen session.update: model=%s, profile=%s, input=pcm/16000 "
+            "output=pcm/24000, modalities=%s, tools=%u, vad=%s, voice=%s",
+            self._qwen_model, "audio-smart-turn" if is_qwen_audio else "omni-manual",
+            session["modalities"], len(session["tools"]), turn_payload, session["voice"],
         )
         if self._tool_debug:
             logger.info(
@@ -1073,7 +1109,11 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             await self.start_ttfb_metrics()
             await self.start_processing_metrics()
             await self.push_frame(UserStoppedSpeakingFrame())
-            if self._current_assistant_response:
+            if self._provider_auto_response:
+                logger.info(
+                    "Qwen-Audio smart_turn speech_stopped -> provider response (no duplicate response.create)"
+                )
+            elif self._current_assistant_response:
                 logger.warning(
                     "Qwen speech_stopped ignored while a response is active"
                 )

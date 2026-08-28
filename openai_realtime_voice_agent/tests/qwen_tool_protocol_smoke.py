@@ -133,6 +133,26 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
         self.assertEqual(service._det_executed_results, {})
         self.assertFalse(service._wake_guard_active())
 
+    def test_qwen_audio_model_uses_its_own_voice_profile(self):
+        self.assertTrue(
+            QwenRealtimeLLMService._is_qwen_audio_realtime_model(
+                "qwen-audio-3.0-realtime-flash"
+            )
+        )
+        self.assertFalse(
+            QwenRealtimeLLMService._is_qwen_audio_realtime_model(
+                "qwen3.5-omni-flash-realtime"
+            )
+        )
+        self.assertEqual(
+            QwenRealtimeLLMService._audio_realtime_voice("Tina"),
+            "longanqian",
+        )
+        self.assertEqual(
+            QwenRealtimeLLMService._audio_realtime_voice("longanlingxi"),
+            "longanlingxi",
+        )
+
     def test_session_echo_rejects_duplicate_or_unregistered_local_handler(self):
         service = object.__new__(QwenRealtimeLLMService)
         service._expected_tool_names = {"HassTurnOn", "HassTurnOff"}

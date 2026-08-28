@@ -1,19 +1,22 @@
 #!/usr/bin/with-contenv bashio
 set -e
 
-# Supervisor normally serves add-on options through bashio. After a HAOS
-# reboot we have observed that endpoint briefly return an empty object even
-# though the authoritative /data/options.json bind mount is already present.
-# Falling back to the local read-only file prevents a false "API key missing"
-# crash loop and does not expose option values in logs.
+# The Supervisor writes the authoritative current Add-on options to the local
+# /data/options.json bind mount. Prefer that file over bashio: on this HAOS
+# host the Supervisor endpoint exposed to Bashio may be stale or unavailable
+# after a reboot even though this file has the newly saved UI configuration.
+# Bashio remains a fallback for development environments without that mount.
 config_value() {
     local key="$1"
     local value
-    value=$(bashio::config "$key" 2>/dev/null || true)
-    if { [ -z "$value" ] || [ "$value" = "null" ]; } && [ -r /data/options.json ]; then
+    value=""
+    if [ -r /data/options.json ]; then
         value=$(jq -r --arg key "$key" \
             '.[$key] // empty | if type == "array" then .[] else . end' \
             /data/options.json)
+    fi
+    if [ -z "$value" ] || [ "$value" = "null" ]; then
+        value=$(bashio::config "$key" 2>/dev/null || true)
     fi
     printf '%s' "$value"
 }

@@ -17,13 +17,13 @@ configuration:
     description: "Optional ISO language code, for example zh, en or nl. Empty lets Qwen detect the language."
   qwen_model:
     name: "🗣️ Qwen · Realtime model"
-    description: "Native Qwen Omni Realtime model. Choose custom only when your Model Studio account has a different supported model."
+    description: "Choose Qwen-Audio or Qwen Omni Realtime. Audio Flash is the low-cost voice-assistant option; Omni Plus supports web search (not alongside HA tools)."
   qwen_model_custom:
     name: "🗣️ Qwen · Custom model"
     description: "Used only when Realtime model is set to custom."
   qwen_voice:
     name: "🗣️ Qwen · Voice"
-    description: "Qwen output voice. Restart the add-on after changing it."
+    description: "Qwen-Audio uses longan* voices; Qwen Omni uses Tina/Ethan. A saved Tina/Ethan setting maps safely to longanqian when Audio is selected."
   qwen_voice_custom:
     name: "🗣️ Qwen · Custom voice"
     description: "Used only when Voice is set to custom."
