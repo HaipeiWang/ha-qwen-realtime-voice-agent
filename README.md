@@ -66,6 +66,11 @@ The Add-on Configuration page exposes these native WebSocket models:
 Home Assistant tools enabled for device control; use a separate search-only
 configuration when testing Omni web search.
 
+Voice choices are model-family safe: Qwen-Audio uses its dedicated `longan*`
+selector (or a Qwen-Audio cloned voice ID), while Qwen3.5 Omni uses a separate
+selector containing only Omni voices. The backend validates legacy/YAML edits
+and falls back with an explicit error if a voice does not match the model.
+
 ## Install the Add-on
 
 1. In Home Assistant open **Settings → Add-ons → Add-on Store → ⋮ →

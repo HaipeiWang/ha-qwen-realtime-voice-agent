@@ -145,12 +145,56 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
             )
         )
         self.assertEqual(
-            QwenRealtimeLLMService._audio_realtime_voice("Tina"),
+            QwenRealtimeLLMService._validated_voice_for_model(
+                "qwen-audio-3.0-realtime-flash", "Tina"
+            ),
             "longanqian",
         )
         self.assertEqual(
-            QwenRealtimeLLMService._audio_realtime_voice("longanlingxi"),
+            QwenRealtimeLLMService._validated_voice_for_model(
+                "qwen-audio-3.0-realtime-plus", "longanlingxi"
+            ),
             "longanlingxi",
+        )
+        self.assertEqual(
+            QwenRealtimeLLMService._validated_voice_for_model(
+                "qwen-audio-3.0-realtime-flash",
+                "qwen-audio-3.0-realtime-flash-myvoice-1234",
+            ),
+            "qwen-audio-3.0-realtime-flash-myvoice-1234",
+        )
+
+    def test_omni_voice_profile_rejects_audio_voice(self):
+        self.assertEqual(
+            QwenRealtimeLLMService._validated_voice_for_model(
+                "qwen3.5-omni-flash-realtime", "Ethan"
+            ),
+            "Ethan",
+        )
+        self.assertEqual(
+            QwenRealtimeLLMService._validated_voice_for_model(
+                "qwen3.5-omni-flash-realtime", "Mione"
+            ),
+            "Mione",
+        )
+        self.assertEqual(
+            QwenRealtimeLLMService._validated_voice_for_model(
+                "qwen3.5-omni-plus-realtime", "Eliška"
+            ),
+            "Eliška",
+        )
+        self.assertEqual(
+            QwenRealtimeLLMService._validated_voice_for_model(
+                "qwen3.5-omni-plus-realtime", "longanqian"
+            ),
+            "Tina",
+        )
+        self.assertEqual(
+            QwenRealtimeLLMService._validated_voice_for_model(
+                "qwen-audio-3.0-realtime-flash",
+                "qwen-audio-3.0-realtime-flash",
+            ),
+            "longanqian",
         )
 
     def test_session_echo_rejects_duplicate_or_unregistered_local_handler(self):

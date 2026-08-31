@@ -2,6 +2,18 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.9.3
+
+### Changed
+
+- Split the mixed voice selector into family-safe Qwen-Audio and Qwen3.5 Omni
+  selectors. The Audio selector exposes only documented longan system voices
+  plus cloned voice IDs; the Omni selector exposes only documented Omni voices.
+- The runtime now validates the selected voice against the active model family.
+  Legacy YAML/API mismatches emit an explicit error and fall back to
+  `longanqian` for Audio or `Tina` for Omni instead of sending an invalid
+  session configuration to Qwen.
+
 ## 0.9.2
 
 ### Added

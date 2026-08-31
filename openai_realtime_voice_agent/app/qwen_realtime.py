@@ -187,18 +187,109 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
     def _is_qwen_audio_realtime_model(model: str) -> bool:
         return str(model or "").startswith("qwen-audio-3.0-realtime-")
 
-    @staticmethod
-    def _audio_realtime_voice(requested_voice: str | None) -> str:
-        """Return an Audio-Realtime-compatible voice without breaking saves.
+    _AUDIO_SYSTEM_VOICES = frozenset({
+        "longanqian",
+        "longanlingxin",
+        "longanlingxi",
+        "longanxiaoxin",
+        "longanlufeng",
+    })
+    _OMNI_SYSTEM_VOICES = frozenset({
+        "Tina",
+        "Cindy",
+        "Liora Mira",
+        "Sunnybobi",
+        "Raymond",
+        "Ethan",
+        "Theo Calm",
+        "Serena",
+        "Harvey",
+        "Maia",
+        "Evan",
+        "Qiao",
+        "Momo",
+        "Wil",
+        "Angel",
+        "Li Cassian",
+        "Mia",
+        "Joyner",
+        "Gold",
+        "Katerina",
+        "Ryan",
+        "Jennifer",
+        "Aiden",
+        "Mione",
+        "Sunny",
+        "Dylan",
+        "Eric",
+        "Peter",
+        "Joseph Chen",
+        "Marcus",
+        "Li",
+        "Kiki",
+        "Rocky",
+        "Sohee",
+        "Lenn",
+        "Ono Anna",
+        "Sonrisa",
+        "Bodega",
+        "Emilien",
+        "Andre",
+        "Radio Gol",
+        "Alek",
+        "Rizky",
+        "Roya",
+        "Arda",
+        "Hana",
+        "Dolce",
+        "Jakub",
+        "Griet",
+        "Eliška",
+        "Marina",
+        "Siiri",
+        "Ingrid",
+        "Sigga",
+        "Bea",
+        "Chloe",
+    })
 
-        Existing installations commonly saved Omni's ``Tina`` or ``Ethan``.
-        Those names are not valid Qwen-Audio system voices, so map them to the
-        documented Audio default while preserving all Audio voices/custom IDs.
+    @classmethod
+    def _validated_voice_for_model(cls, model: str, requested_voice: str | None) -> str:
+        """Validate the model-family voice and fall back without killing audio.
+
+        The UI prevents new incompatible combinations. This guard handles old
+        option records, YAML/API edits and unknown custom values. Qwen-Audio
+        cloned voice IDs are provider-generated and carry a qwen-audio prefix.
         """
+        model = str(model or "").strip()
         voice = str(requested_voice or "").strip()
-        if voice in ("", "Tina", "Ethan"):
+        if cls._is_qwen_audio_realtime_model(model):
+            valid = voice in cls._AUDIO_SYSTEM_VOICES or voice.startswith(
+                (
+                    "qwen-audio-3.0-realtime-flash-",
+                    "qwen-audio-3.0-realtime-plus-",
+                )
+            )
+            if valid:
+                return voice
+            logger.error(
+                "Incompatible Qwen voice: model=%s requires a longan* system "
+                "voice or Qwen-Audio cloned voice ID; got %r. Falling back to "
+                "longanqian.",
+                model,
+                voice,
+            )
             return "longanqian"
-        return voice
+
+        if voice in cls._OMNI_SYSTEM_VOICES:
+            return voice
+        logger.error(
+            "Incompatible Qwen voice: model=%s requires a Qwen3.5 Omni voice; "
+            "got %r. Falling back to Tina.",
+            model,
+            voice,
+        )
+        return "Tina"
 
     @classmethod
     def _to_qwen_tool(cls, value):
@@ -439,7 +530,10 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         effective_instructions = self._session_instructions
         if extra_instructions:
             effective_instructions = f"{effective_instructions}\n\n{extra_instructions}"
-        requested_voice = getattr(audio_output, "voice", None) or "Tina"
+        requested_voice = getattr(audio_output, "voice", None)
+        effective_voice = self._validated_voice_for_model(
+            self._qwen_model, requested_voice
+        )
         session = {
             "modalities": ["text", "audio"],
             # The generic inherited OpenAI prompt only says that the assistant
@@ -447,10 +541,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             # making a function call. This provider-neutral policy makes real
             # HA control a required precondition for a success confirmation.
             "instructions": effective_instructions,
-            "voice": (
-                self._audio_realtime_voice(requested_voice)
-                if is_qwen_audio else requested_voice
-            ),
+            "voice": effective_voice,
             "turn_detection": turn_payload,
             "tools": qwen_tools,
         }

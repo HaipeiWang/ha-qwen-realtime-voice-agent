@@ -359,11 +359,19 @@ class Application:
         # Get instructions with default
         instructions = os.environ.get("INSTRUCTIONS", "You are the Home Assistant Voice Agent and can control the Smart Home.")
 
-        # Qwen Realtime model + voice. These are dropdowns in the add-on UI with
-        # a "custom" sentinel + a sibling *_CUSTOM free-text field; _resolve_choice
-        # returns the custom value when the dropdown is "custom", else the dropdown.
+        # Qwen Realtime model + family-safe voice. Home Assistant's static
+        # Add-on schema cannot condition one dropdown on another, so the UI has
+        # separate Audio and Omni voice selectors. Only the active model
+        # family's selector is read. QWEN_VOICE remains a migration fallback for
+        # pre-v0.9.3 option records and is no longer exposed in the UI.
         openai_model = _resolve_choice("QWEN_MODEL", "QWEN_MODEL_CUSTOM", "qwen-audio-3.0-realtime-flash")
-        openai_voice = _resolve_choice("QWEN_VOICE", "QWEN_VOICE_CUSTOM", "longanqian")
+        legacy_voice = _resolve_choice("QWEN_VOICE", "QWEN_VOICE_CUSTOM", "")
+        if openai_model.startswith("qwen-audio-3.0-realtime-"):
+            openai_voice = _resolve_choice(
+                "QWEN_AUDIO_VOICE", "QWEN_AUDIO_VOICE_CUSTOM", legacy_voice or "longanqian"
+            )
+        else:
+            openai_voice = os.environ.get("QWEN_OMNI_VOICE", "").strip() or legacy_voice or "Tina"
 
         # Playback speed (post-generation rate): 0.25-1.5, 1.0 = normal. Clamped.
         try:

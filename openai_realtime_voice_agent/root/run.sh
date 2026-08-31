@@ -46,6 +46,11 @@ TRANSCRIPTION_LANGUAGE=$(config_value 'transcription_language')
 
 # --- 🗣️ Model & voice ---
 QWEN_MODEL=$(config_value 'qwen_model')
+QWEN_AUDIO_VOICE=$(config_value 'qwen_audio_voice')
+QWEN_OMNI_VOICE=$(config_value 'qwen_omni_voice')
+# Migration-only fallback for options saved before v0.9.3. This key is no
+# longer present in the Configuration UI because it mixed incompatible model
+# families in one dropdown.
 QWEN_VOICE=$(config_value 'qwen_voice')
 OPENAI_SPEED=$(config_value 'openai_speed')
 MAX_OUTPUT_TOKENS=$(config_value 'max_output_tokens')
@@ -101,6 +106,8 @@ export QWEN_REGION
 export INSTRUCTIONS
 export TRANSCRIPTION_LANGUAGE
 export QWEN_MODEL
+export QWEN_AUDIO_VOICE
+export QWEN_OMNI_VOICE
 export QWEN_VOICE
 export OPENAI_SPEED
 export MAX_OUTPUT_TOKENS
@@ -134,6 +141,11 @@ if config_has_value 'qwen_model_custom'; then
     QWEN_MODEL_CUSTOM=$(config_value 'qwen_model_custom')
     export QWEN_MODEL_CUSTOM
 fi
+if config_has_value 'qwen_audio_voice_custom'; then
+    QWEN_AUDIO_VOICE_CUSTOM=$(config_value 'qwen_audio_voice_custom')
+    export QWEN_AUDIO_VOICE_CUSTOM
+fi
+# Migration-only fallback; no longer exposed in the v0.9.3 schema.
 if config_has_value 'qwen_voice_custom'; then
     QWEN_VOICE_CUSTOM=$(config_value 'qwen_voice_custom')
     export QWEN_VOICE_CUSTOM

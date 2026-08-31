@@ -20,12 +20,15 @@ configuration:
   qwen_model_custom:
     name: "🗣️ 千问 · 自定义模型"
     description: "仅当 Realtime 模型选择 custom 时使用。"
-  qwen_voice:
-    name: "🗣️ 千问 · 音色"
-    description: "Qwen-Audio 使用 longan* 音色；Qwen Omni 使用 Tina/Ethan。切换模型时，旧的 Tina/Ethan 会自动兼容为 longanqian。"
-  qwen_voice_custom:
-    name: "🗣️ 千问 · 自定义音色"
-    description: "仅当音色选择 custom 时使用。"
+  qwen_audio_voice:
+    name: "🗣️ Qwen-Audio · 音色"
+    description: "仅供两个 Qwen-Audio 3.0 Realtime 模型使用；列表只包含兼容的 longan* 系统音色。"
+  qwen_audio_voice_custom:
+    name: "🗣️ Qwen-Audio · 声音复刻 ID"
+    description: "仅当 Qwen-Audio 音色选择 custom 时使用。填写百炼声音复刻接口返回的 Qwen-Audio voice_id。"
+  qwen_omni_voice:
+    name: "🗣️ Qwen3.5 Omni · 音色"
+    description: "仅供两个 Qwen3.5 Omni Realtime 模型使用；列表只包含官方 Omni 音色。"
   openai_speed:
     name: "🗣️ 千问 · 播放速度"
     description: "1.0 为正常速度；更低更慢、更高更快。底层 YAML 旧字段为兼容已有配置而保留。"

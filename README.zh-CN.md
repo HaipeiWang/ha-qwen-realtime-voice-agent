@@ -59,6 +59,10 @@ Add-on 的配置页面提供以下原生 WebSocket 模型：
 \* 千问不能在同一会话同时启用联网搜索和 Function Calling。控制设备时请保持
 Home Assistant 工具开启；测试 Omni 联网搜索时请使用独立的“仅搜索”配置。
 
+音色按模型族分开选择：Qwen-Audio 使用独立的 `longan*` 下拉菜单（或声音复刻
+voice_id），Qwen3.5 Omni 使用只包含 Omni 音色的下拉菜单。后端还会校验旧配置
+或手工 YAML 修改；发现音色与模型不兼容时会记录明确错误并回退到该模型族默认音色。
+
 ## 安装 Add-on
 
 1. 在 Home Assistant 中依次打开 **设置 → Add-ons → Add-on Store → ⋮ → 仓库**。

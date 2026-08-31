@@ -21,12 +21,15 @@ configuration:
   qwen_model_custom:
     name: "🗣️ Qwen · Custom model"
     description: "Used only when Realtime model is set to custom."
-  qwen_voice:
-    name: "🗣️ Qwen · Voice"
-    description: "Qwen-Audio uses longan* voices; Qwen Omni uses Tina/Ethan. A saved Tina/Ethan setting maps safely to longanqian when Audio is selected."
-  qwen_voice_custom:
-    name: "🗣️ Qwen · Custom voice"
-    description: "Used only when Voice is set to custom."
+  qwen_audio_voice:
+    name: "🗣️ Qwen-Audio · Voice"
+    description: "Used only by the two Qwen-Audio 3.0 Realtime models. This list contains only compatible longan* system voices."
+  qwen_audio_voice_custom:
+    name: "🗣️ Qwen-Audio · Cloned voice ID"
+    description: "Used only when the Qwen-Audio voice is custom. Enter a Qwen-Audio voice_id returned by Model Studio voice cloning."
+  qwen_omni_voice:
+    name: "🗣️ Qwen3.5 Omni · Voice"
+    description: "Used only by the two Qwen3.5 Omni Realtime models. This list contains only official Omni voices."
   openai_speed:
     name: "🗣️ Qwen · Playback speed"
     description: "Speech playback rate: 1.0 is normal; lower is slower and higher is faster. The legacy YAML key is retained for compatibility."
