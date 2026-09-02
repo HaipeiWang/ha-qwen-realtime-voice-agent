@@ -1,7 +1,7 @@
-name: Qwen Omni Realtime Voice Agent
-version: "0.9.3"
+name: Qwen Realtime Voice Agent
+version: "0.10.0-beta.1"
 slug: openai_realtime_voice_agent
-description: Native Qwen Omni Realtime speech-to-speech voice agent for Home Assistant Voice PE, with MCP device control.
+description: Native Qwen Realtime speech-to-speech voice agent for Home Assistant Voice PE, with automatic Home Assistant tools.
 url: https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
 arch:
   - aarch64
@@ -88,10 +88,10 @@ options:
   # an unprompted answer). Was a hardcoded 400 ms in the firmware yaml; now sent
   # in `hello` so it's tunable like follow_up_open_delay_ms.
   wake_open_delay_ms: 700
-  # Backend-side guard after each {"type":"wake"}. It rejects early PCM/VAD
-  # caused by a delayed chime tail or packets already queued before the new
-  # turn boundary. Keep below wake_open_delay_ms so normal speech is not lost.
-  wake_audio_guard_ms: 600
+  # Compatibility guard for older Voice PE firmware that opened capture before
+  # the wake chime drained. Current firmware waits, discards pre-roll, and only
+  # then sends wake, so zero preserves the user's first spoken word.
+  wake_audio_guard_ms: 0
   vad_eagerness: "low"
   phase_idle_debounce_ms: 1500
 

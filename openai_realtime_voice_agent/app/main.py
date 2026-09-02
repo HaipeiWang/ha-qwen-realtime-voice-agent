@@ -250,7 +250,7 @@ class SafeRealtimeLLMService(QwenRealtimeLLMService):
             function_name, liveness_tracked, start_callback, cancel_on_interruption=False
         )
 
-    async def _receive_task_handler(self):  # type: ignore[override]
+    async def _receive_task_handler(self, *args, **kwargs):  # type: ignore[override]
         """Surface OpenAI reader death as an ErrorFrame so recovery can act.
 
         pipecat's receive loop can end without producing ANY ErrorFrame: a
@@ -263,16 +263,19 @@ class SafeRealtimeLLMService(QwenRealtimeLLMService):
         message as a reconnect trigger.
         """
         try:
-            await super()._receive_task_handler()
+            await super()._receive_task_handler(*args, **kwargs)
         except asyncio.CancelledError:
             raise  # our own disconnect/reset tearing the task down — not a death
         except Exception as e:
+            if getattr(self, "_disconnecting", False):
+                return
             await self.push_error(error_msg=f"realtime receive loop died: {e!r}")
             return
         # Loop ended without an exception: a clean server-side close, or the
         # fatal-error path (which already pushed its own ErrorFrame —
         # duplicates collapse in ConnectionRecovery's cooldown/guard).
-        await self.push_error(error_msg="realtime receive loop ended — connection closed")
+        if not getattr(self, "_disconnecting", False):
+            await self.push_error(error_msg="realtime receive loop ended — connection closed")
 
 
 class Application:
@@ -457,12 +460,13 @@ class Application:
             wake_open_delay_ms = 700
         wake_open_delay_ms = max(0, min(5000, wake_open_delay_ms))
         try:
-            wake_audio_guard_ms = int(os.environ.get("WAKE_AUDIO_GUARD_MS", "600"))
+            wake_audio_guard_ms = int(os.environ.get("WAKE_AUDIO_GUARD_MS", "0"))
         except (TypeError, ValueError):
-            wake_audio_guard_ms = 600
-        # The device does not intentionally open its mic before
-        # wake_open_delay_ms. Clamping the backend guard to that delay prevents
-        # a typo from dropping a user's first real word.
+            wake_audio_guard_ms = 0
+        # Current Voice PE firmware already waits for the full wake chime plus
+        # wake_open_delay_ms, discards pre-roll, then sends wake before enabling
+        # capture. A second backend guard therefore defaults to zero; retain the
+        # setting only as an A/B diagnostic for older firmware.
         wake_audio_guard_ms = max(0, min(wake_audio_guard_ms, wake_open_delay_ms))
         # Playback jitter buffer (ms): the device holds incoming TTS until this
         # much has accumulated before playing, so a brief network hiccup doesn't
@@ -874,7 +878,9 @@ class Application:
         """Run the application."""
         await self.initialize()
         
-        # Create initial OpenAI service (will be replaced per connection)
+        # Create the one provider service owned by the one persistent pipeline.
+        # Device WebSocket reconnects must rebind this instance, never replace
+        # it with an unpipelined shadow service.
         await self._ensure_openai_service()
         
         # Build pipeline - based on pipecat-examples, one pipeline handles all connections
@@ -931,7 +937,11 @@ class Application:
         # Setup WebSocket event handlers
         async def on_client_connected(client_id: str):
             """Handle new client connection."""
-            await self._ensure_openai_service(client_id=client_id)
+            if self.session_manager and self.openai_service is not None:
+                self.session_manager.set_current_service(client_id, self.openai_service)
+                logger.info(
+                    "Reused pipeline Qwen service for device client %s", client_id
+                )
             if self.audio_recording_service:
                 self.audio_recording_service.start_new_session(client_id)
         

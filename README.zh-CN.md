@@ -6,7 +6,7 @@
   <a href="README.md">English</a> · <strong>简体中文</strong>
 </p>
 
-# 适用于 Home Assistant Voice PE 的通义千问 Omni Realtime 语音助手
+# 适用于 Home Assistant Voice PE 的通义千问 Realtime 语音助手
 
 这是一个 Home Assistant OS Add-on，可将运行定制固件的 Voice PE 直接连接到
 阿里云百炼 **Qwen Omni Realtime**。设备的麦克风音频通过千问原生 Realtime
@@ -72,7 +72,7 @@ voice_id），Qwen3.5 Omni 使用只包含 Omni 音色的下拉菜单。后端�
    https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
    ```
 
-3. 安装 **Qwen Omni Realtime Voice Agent**。仓库有意不绑定固定容器镜像，HAOS
+3. 安装 **Qwen Realtime Voice Agent**。仓库有意不绑定固定容器镜像，HAOS
    会使用随附的 Dockerfile 为当前主机架构构建 Add-on，首次构建可能需要几分钟。
 4. 打开 Add-on 的 **配置** 页面，填写你自己的：
 
@@ -110,7 +110,7 @@ Starting WebSocket server and pipeline
 ## 连接 Voice PE
 
 设备端固件位于
-[xandervanerven/home-assistant-voice-pe](https://github.com/xandervanerven/home-assistant-voice-pe)。
+[HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen)。
 请通过 **ESPHome Device Builder** 使用该仓库提供的 DHCP 或静态 IP 配置刷入定制固件。
 首次替换原厂固件通常需要 USB，之后可以使用 OTA 更新。
 
@@ -134,7 +134,8 @@ Voice PE 启动后应连接 Add-on 并进入空闲 LED 状态。说出配置的�
 ## 项目来源
 
 - Voice PE 协议及固件集成：
-  [xandervanerven/home-assistant-voice-pe](https://github.com/xandervanerven/home-assistant-voice-pe)
+  [HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen)，
+  fork 自 [xandervanerven/home-assistant-voice-pe](https://github.com/xandervanerven/home-assistant-voice-pe)
 - 后端 Add-on 基础：
   [fjfricke/ha-openai-realtime](https://github.com/fjfricke/ha-openai-realtime)
 - 运行框架：[Pipecat](https://github.com/pipecat-ai/pipecat)

@@ -5,6 +5,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 # The Add-on image flattens the source package into /app, while the checkout
@@ -96,6 +97,7 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
             service._response_cancel_pending = False
             service._response_after_cancel_pending = False
             service._response_create_inflight = False
+            service._response_done_generation = 3
             service._api_session_ready = True
             service._pending_tool_call_ids = set()
             service._current_assistant_response = None
@@ -110,6 +112,7 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
             await service._create_response()
 
             self.assertTrue(service._response_create_inflight)
+            self.assertIsNone(service._response_done_generation)
             self.assertEqual(service._ws_send_checked.await_count, 1)
 
         asyncio.run(scenario())
@@ -260,6 +263,11 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
         async def scenario():
             service = object.__new__(QwenRealtimeLLMService)
             service._pending_tool_call_ids = {"call-1"}
+            service._tool_call_generations = {"call-1": 4}
+            service._provider_generation = 4
+            service._provider_state = "active"
+            service._conversation_active = True
+            service._api_session_ready = True
             service._skip_next_response_create = False
             service._ws_send_checked = AsyncMock(side_effect=ConnectionError("closed"))
             service._reset_failed_response = AsyncMock()
@@ -270,6 +278,47 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
             service._reset_failed_response.assert_awaited_once()
             service.push_error.assert_awaited_once()
             self.assertTrue(service._skip_next_response_create)
+
+        asyncio.run(scenario())
+
+    def test_pcm_never_opens_provider_without_wake(self):
+        async def scenario():
+            service = object.__new__(QwenRealtimeLLMService)
+            service._qwen_first_input_logged = False
+            service._api_session_ready = False
+            service._websocket = None
+            service._conversation_active = False
+            service._provider_state = "disconnected"
+            service._pending_input_audio = []
+            service._pending_input_audio_bytes = 0
+            service._pending_input_audio_limit = 160000
+            service._send_audio_bytes = AsyncMock()
+            service.open_conversation = AsyncMock()
+
+            await service._send_user_audio(SimpleNamespace(audio=b"\0" * 512))
+
+            service.open_conversation.assert_not_awaited()
+            service._send_audio_bytes.assert_not_awaited()
+            self.assertEqual(service._pending_input_audio_bytes, 0)
+
+        asyncio.run(scenario())
+
+    def test_tool_result_from_old_generation_is_discarded(self):
+        async def scenario():
+            service = object.__new__(QwenRealtimeLLMService)
+            service._tool_call_generations = {"old-call": 2}
+            service._provider_generation = 3
+            service._provider_state = "active"
+            service._conversation_active = True
+            service._api_session_ready = True
+            service._pending_tool_call_ids = {"old-call"}
+            service._ws_send_checked = AsyncMock()
+
+            sent = await service._send_tool_result("old-call", {"success": True})
+
+            self.assertFalse(sent)
+            service._ws_send_checked.assert_not_awaited()
+            self.assertNotIn("old-call", service._pending_tool_call_ids)
 
         asyncio.run(scenario())
 

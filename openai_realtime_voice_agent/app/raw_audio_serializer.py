@@ -51,6 +51,10 @@ class RawAudioSerializer(FrameSerializer):
         # Resets the dangling-VAD guard's "speech since wake" tracker. Set by
         # WebSocketHandler.build_pipeline.
         self._on_wake = None
+        # Explicit end of the whole wake/follow-up conversation. Unlike
+        # ``flush`` (also sent when reply playback closes the mic), this event
+        # is safe to use as a provider-session close boundary.
+        self._on_conversation_end = None
         # Optional diagnostics hooks. These sit at the actual WebSocket PCM
         # boundary, which is more reliable than relying on a particular
         # Pipecat frame type making it through a pipeline branch.
@@ -60,10 +64,9 @@ class RawAudioSerializer(FrameSerializer):
         self._output_hook_logged = False
         # Diagnostic counter for incoming binary (mic audio) frames.
         self._binary_frames_received = 0
-        # A wake is a hard audio-generation boundary. The device sends its
-        # control frame before it enables capture, but a previous websocket
-        # packet can already be in flight. Reject early binary packets so a
-        # chime tail cannot become the first VAD segment of the new turn.
+        # Optional compatibility guard for firmware that opens capture before
+        # the wake chime drains. Current Voice PE sends wake after the chime,
+        # hardware-tail delay and pre-roll discard, so this defaults to zero.
         self._wake_audio_guard_ms = 0
         self._wake_audio_guard_until = 0.0
         self._wake_generation = 0
@@ -88,6 +91,10 @@ class RawAudioSerializer(FrameSerializer):
     def set_wake_handler(self, handler):
         """Register the async no-arg callback fired on a device 'wake'."""
         self._on_wake = handler
+
+    def set_conversation_end_handler(self, handler):
+        """Register the callback fired on device ``conversation_end``."""
+        self._on_conversation_end = handler
 
     def set_input_audio_handler(self, handler):
         """Register a synchronous callback for PCM received from the device."""
@@ -163,16 +170,29 @@ class RawAudioSerializer(FrameSerializer):
                 self._wake_audio_guard_until = (
                     time.monotonic() + self._wake_audio_guard_ms / 1000.0
                 )
-                logger.info(
-                    "🛡️ wake generation=%u; rejecting device PCM for %ums",
-                    self._wake_generation,
-                    self._wake_audio_guard_ms,
-                )
+                if self._wake_audio_guard_ms:
+                    logger.info(
+                        "🛡️ wake generation=%u; rejecting device PCM for %ums",
+                        self._wake_generation,
+                        self._wake_audio_guard_ms,
+                    )
+                else:
+                    logger.info(
+                        "🛡️ wake generation=%u; device PCM accepted immediately",
+                        self._wake_generation,
+                    )
                 if self._on_wake is not None:
                     try:
                         await self._on_wake()
                     except Exception as e:
                         logger.warning(f"⚠️ device wake handler failed: {e!r}")
+            elif isinstance(data, dict) and data.get("type") == "conversation_end":
+                logger.info("🏁 device conversation end received")
+                if self._on_conversation_end is not None:
+                    try:
+                        await self._on_conversation_end()
+                    except Exception as e:
+                        logger.warning(f"⚠️ device conversation-end handler failed: {e!r}")
             # interrupt / ping / start / other control frames: nothing to inject.
             return None
 

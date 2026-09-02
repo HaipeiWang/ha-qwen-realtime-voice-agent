@@ -2,6 +2,38 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.10.0-beta.1
+
+### Added
+
+- Conversation-scoped Qwen connections: only an explicit Voice PE `wake` event
+  creates a provider session, while ordinary PCM can never reconnect implicitly.
+- One lifecycle lock and provider generation checks across open, close, audio,
+  response boundaries, and asynchronous Home Assistant tool results.
+- Explicit Voice PE `conversation_end` handling and a dedicated ordered
+  `QwenResponseDoneFrame` delivered through the same pipeline as reply audio.
+
+### Fixed
+
+- `flush` now clears only uncommitted microphone audio and never closes Qwen.
+- Qwen closes only after `response.done`, the paced player has drained, and the
+  follow-up conversation window has ended. Session close resets playback, VAD,
+  reply boundaries, TTS and pending-tool state.
+- Late tool results are discarded when their generation no longer matches, so
+  they cannot leak into a later conversation.
+- Removed the direct response-boundary callback that could overtake queued audio
+  and discard most of a reply. The ordered frame preserves complete playback.
+- Current firmware wake gating no longer loses the user's first word; the legacy
+  Add-on wake-audio guard now defaults to zero.
+- Successful forced Qwen transport cleanup after its 1.5-second close deadline is
+  logged at INFO instead of being presented as a user-visible failure.
+
+### Companion firmware
+
+- Use [HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen)
+  `1.3.0-beta.1` for the matching `conversation_end` protocol, wake-chime boundary,
+  warm playback chain, and echo-resistant stop threshold.
+
 ## 0.9.3
 
 ### Changed
@@ -176,15 +208,15 @@ device's YAML in ESPHome Builder (everything else — your name, secrets,
 ```yaml
 packages:
   realtime:
-    url: https://github.com/xandervanerven/home-assistant-voice-pe
+    url: https://github.com/HaipeiWang/home-assistant-voice-pe-qwen
     ref: main
     files: [home-assistant-voice.realtime.yaml]
     refresh: 0s
 ```
 
 Current templates for reference:
-[esphome-builder.dhcp.yaml](https://github.com/xandervanerven/home-assistant-voice-pe/blob/main/esphome-builder.dhcp.yaml) ·
-[esphome-builder.static-ip.yaml](https://github.com/xandervanerven/home-assistant-voice-pe/blob/main/esphome-builder.static-ip.yaml)
+[esphome-builder.dhcp.yaml](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen/blob/main/esphome-builder.dhcp.yaml) ·
+[esphome-builder.static-ip.yaml](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen/blob/main/esphome-builder.static-ip.yaml)
 
 ## 0.4.26
 

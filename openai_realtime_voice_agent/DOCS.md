@@ -1,4 +1,4 @@
-# Qwen Omni Realtime Voice Agent — Setup and Validation
+# Qwen Realtime Voice Agent — Setup and Validation
 
 This Add-on is one half of the system. The Add-on runs the Qwen session and
 Home Assistant tools; the companion Voice PE firmware captures and plays audio.
@@ -25,7 +25,7 @@ Repositories**, add:
 https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
 ```
 
-Install **Qwen Omni Realtime Voice Agent**. HAOS builds the Add-on locally from
+Install **Qwen Realtime Voice Agent**. HAOS builds the Add-on locally from
 the included Dockerfile for `amd64` or `aarch64`. The first build downloads the
 Python dependencies and may take several minutes. Use the installation log to
 follow progress.
@@ -97,7 +97,7 @@ the IDs above. An empty list enables every supported capability template.
 ## 5. Connect Home Assistant Voice PE
 
 Install the companion firmware from
-[xandervanerven/home-assistant-voice-pe](https://github.com/xandervanerven/home-assistant-voice-pe):
+[HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen):
 
 1. Install and open **ESPHome Device Builder**.
 2. Adopt the Voice PE and retain the generated API encryption and OTA values in
@@ -195,5 +195,5 @@ Then verify these scenarios:
 - [Qwen Realtime overview](https://help.aliyun.com/zh/model-studio/realtime)
 - [Qwen Realtime client events](https://help.aliyun.com/zh/model-studio/client-events)
 - [Qwen Realtime server events](https://help.aliyun.com/zh/model-studio/server-events)
-- [Voice PE companion firmware](https://github.com/xandervanerven/home-assistant-voice-pe)
+- [Voice PE companion firmware](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen)
 - [Home Assistant MCP Server](https://www.home-assistant.io/integrations/mcp_server/)

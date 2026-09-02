@@ -207,8 +207,10 @@ class ConnectionRecovery(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if self._refresh_task is None:
-            self._refresh_task = asyncio.create_task(self._proactive_refresh_loop())
+        # Provider lifetime is now conversation-scoped: device wake opens Qwen
+        # and the follow-up cut-off closes it. Do not start the legacy permanent
+        # keepalive loop, which caused a predictable response_idle_timeout while
+        # the Voice PE was asleep.
         if isinstance(frame, InputAudioRawFrame):
             # Only kept for the proactive-refresh "is anyone interacting?" check.
             # (Stale-audio clearing is now done at the cut-off source — the device
@@ -259,6 +261,10 @@ class ConnectionRecovery(FrameProcessor):
     async def _recover(self, reason: str):
         t0 = time.monotonic()
         age_s = t0 - self._connected_at
+        if not getattr(self._service, "_conversation_active", True):
+            logger.info("Qwen recovery skipped because no device conversation is active")
+            self._reconnecting = False
+            return
         try:
             logger.warning(
                 f"🔌 OpenAI Realtime connection lost after {age_s:.0f}s "
@@ -387,7 +393,7 @@ class WebSocketHandler:
         follow_up_ms: int = 0,
         follow_up_open_delay_ms: int = 700,
         wake_open_delay_ms: int = 700,
-        wake_audio_guard_ms: int = 600,
+        wake_audio_guard_ms: int = 0,
         playback_prebuffer_ms: int = 0,
     ):
         """
@@ -407,9 +413,10 @@ class WebSocketHandler:
             wake_open_delay_ms: How long (ms) the device waits after the wake
                 chime before opening the mic, so the chime's hardware tail can't
                 leak into the fresh mic as a ghost turn. Sent in `hello`.
-            wake_audio_guard_ms: How long the backend rejects binary PCM and
-                VAD events after a wake. This is an independent hard boundary
-                for packets already queued ahead of the device control frame.
+            wake_audio_guard_ms: Optional compatibility guard for old firmware
+                that opened capture before the wake chime drained. Current
+                Voice PE firmware sends wake only after that boundary, so the
+                default is zero to preserve the user's first word.
         """
         self.host = host
         self.port = port
@@ -579,6 +586,19 @@ class WebSocketHandler:
         # This sits before activity/phase processing so BotStopped cannot make
         # the device idle before all queued audio has actually been sent.
         paced_audio_sender = PacedAudioSender(prime_ms=1400, packet_ms=20)
+        output_drained = getattr(openai_service, "on_output_drained", None)
+        if output_drained is not None:
+            paced_audio_sender.set_response_drained_handler(output_drained)
+        set_provider_close_handler = getattr(
+            openai_service, "set_provider_close_handler", None
+        )
+        if set_provider_close_handler is not None:
+            async def _reset_output_on_provider_close(reason: str):
+                await paced_audio_sender.reset(
+                    f"provider close: {reason}", wait_for_start=True
+                )
+
+            set_provider_close_handler(_reset_output_on_provider_close)
         pipeline_components.append(paced_audio_sender)
 
         pipeline_components.append(output_activity_tracker)
@@ -617,9 +637,10 @@ class WebSocketHandler:
             enable_turn_tracking=False,
         )
         
-        # Start pipeline in background
-        asyncio.create_task(runner.run(task))
-        logger.info("✅ Pipeline started for WebSocket connection")
+        # Application.run() owns the runner lifecycle. Starting it here as well
+        # creates two StartFrames for one PipelineTask and lets the same stateful
+        # processors run concurrently.
+        logger.info("✅ Pipeline prepared; runner lifecycle owned by Application.run")
         logger.info("✅ Pipeline initialized successfully")
 
         # Wire the device "stop" interrupt. The serializer calls this when it
@@ -715,6 +736,9 @@ class WebSocketHandler:
             # Reset PhaseEmitter through its authoritative idle path so its
             # strict half-duplex reply latch cannot poison every later turn.
             await phase_emitter.force_idle("device interrupt")
+            schedule_close = getattr(openai_service, "schedule_conversation_close", None)
+            if schedule_close is not None:
+                schedule_close(1.0, "device interrupt completed")
 
         @openai_service.event_handler("on_conversation_item_created")
         async def _kill_racing_response(service, item_id, item):
@@ -759,19 +783,19 @@ class WebSocketHandler:
                 logger.debug(f"🎬 connect-time input clear no-op ({e!r})")
 
         async def _on_device_mic_flush():
-            # The device sends {"type":"flush"} when a follow-up window times out
-            # mid-stream. Drop any uncommitted partial utterance NOW, at the
-            # cut-off, so a later wake can't "complete" it into a stale answer.
-            # This replaced the reactive clear-on-mic-resume, which fired on
-            # every wake and disturbed the server VAD → spurious garbage commits.
-            # Also a turn boundary for the dangling-VAD guard: the follow-up
-            # closed without speech, so any later server-VAD stop is dangling.
-            phase_emitter.note_wake()
+            # ``flush`` is only an input-buffer command. Voice PE sends it both
+            # when reply playback gates the mic and when a follow-up timer ends,
+            # so it cannot define the provider conversation lifetime.
             try:
                 await openai_service.send_client_event(openai_rt_events.InputAudioBufferClearEvent())
-                logger.info("🧽 follow-up cut-off → input_audio_buffer.clear (drop partial utterance)")
+                logger.info("🧽 device flush → input_audio_buffer.clear only")
             except Exception as e:
                 logger.debug(f"🧽 mic-flush input clear no-op ({e!r})")
+
+        async def _on_device_conversation_end():
+            close_conversation = getattr(openai_service, "close_conversation", None)
+            if close_conversation is not None:
+                await close_conversation("explicit device conversation_end")
 
         async def _on_device_wake():
             # va_client sends {"type":"wake"} on every wake (start_session). Mark
@@ -790,6 +814,18 @@ class WebSocketHandler:
             begin_wake_turn = getattr(openai_service, "begin_wake_turn", None)
             if begin_wake_turn is not None:
                 begin_wake_turn(self.wake_audio_guard_ms)
+            # Current Voice PE firmware sends wake only after the wake chime,
+            # its hardware-tail delay, and pre-roll discard. The service still
+            # buffers PCM that races session.updated, so the first spoken word
+            # is retained without a second backend rejection window.
+            open_conversation = getattr(openai_service, "open_conversation", None)
+            if open_conversation is not None:
+                try:
+                    await open_conversation()
+                except Exception as e:
+                    logger.exception("❌ Qwen on-wake connection failed")
+                    await phase_emitter.force_idle(f"Qwen connection failed: {e!r}")
+                    return
             try:
                 await openai_service.send_client_event(
                     openai_rt_events.InputAudioBufferClearEvent()
@@ -826,6 +862,7 @@ class WebSocketHandler:
             self._serializer.set_session_start_handler(_on_device_session_start)
             self._serializer.set_mic_flush_handler(_on_device_mic_flush)
             self._serializer.set_wake_handler(_on_device_wake)
+            self._serializer.set_conversation_end_handler(_on_device_conversation_end)
 
         return pipeline, runner, task
     

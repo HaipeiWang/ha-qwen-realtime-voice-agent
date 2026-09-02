@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="openai_realtime_voice_agent/icon.png" alt="Qwen Omni Realtime Voice Agent for Home Assistant Voice PE" width="160"/>
+  <img src="openai_realtime_voice_agent/icon.png" alt="Qwen Realtime Voice Agent for Home Assistant Voice PE" width="160"/>
 </p>
 
 <p align="center">
   <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-# Qwen Omni Realtime Voice Agent for Home Assistant Voice PE
+# Qwen Realtime Voice Agent for Home Assistant Voice PE
 
 A Home Assistant OS Add-on that connects custom Voice PE firmware directly to
 Alibaba Cloud Model Studio **Qwen Omni Realtime**. Microphone audio goes to the
@@ -81,7 +81,7 @@ and falls back with an explicit error if a voice does not match the model.
    https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
    ```
 
-3. Install **Qwen Omni Realtime Voice Agent**. The repository intentionally has
+3. Install **Qwen Realtime Voice Agent**. The repository intentionally has
    no fixed container image, so HAOS builds the Add-on for its own architecture
    from the included Dockerfile. The first build can take several minutes.
 4. Open the Add-on **Configuration** page and enter your own:
@@ -122,7 +122,7 @@ Starting WebSocket server and pipeline
 ## Connect the Voice PE
 
 The device half lives in
-[xandervanerven/home-assistant-voice-pe](https://github.com/xandervanerven/home-assistant-voice-pe).
+[HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen).
 Install its custom firmware through **ESPHome Device Builder** using the DHCP or
 static-IP stub supplied by that repository. The first replacement of stock
 firmware normally requires USB; later updates can use OTA.
@@ -147,7 +147,8 @@ validation, tuning, and troubleshooting guide.
 ## Project lineage
 
 - Voice PE protocol and firmware integration:
-  [xandervanerven/home-assistant-voice-pe](https://github.com/xandervanerven/home-assistant-voice-pe)
+  [HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen),
+  forked from [xandervanerven/home-assistant-voice-pe](https://github.com/xandervanerven/home-assistant-voice-pe)
 - Backend Add-on foundation:
   [fjfricke/ha-openai-realtime](https://github.com/fjfricke/ha-openai-realtime)
 - Runtime framework: [Pipecat](https://github.com/pipecat-ai/pipecat)

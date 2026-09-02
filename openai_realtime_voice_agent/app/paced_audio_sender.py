@@ -11,7 +11,7 @@ import asyncio
 import logging
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Optional, Union
+from typing import Awaitable, Callable, Deque, Optional, Union
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -30,6 +30,8 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+from app.qwen_frames import QwenResponseDoneFrame
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +73,13 @@ class PacedAudioSender(FrameProcessor):
         # must be discarded until a new LLMFullResponseStartFrame arrives.
         self._drop_audio_until_start = False
         self._first_pcm_logged_for_response = False
+        self._on_response_drained: Optional[Callable[[], Awaitable[None]]] = None
+
+    def set_response_drained_handler(
+        self, handler: Optional[Callable[[], Awaitable[None]]]
+    ) -> None:
+        """Run an async callback after a full response boundary leaves the queue."""
+        self._on_response_drained = handler
 
     def _cancel_boundary_timeout(self) -> None:
         if self._boundary_task is not None and not self._boundary_task.done():
@@ -250,6 +259,39 @@ class PacedAudioSender(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
+        # Provider-specific response.done travels through the same ordered
+        # Pipecat data queue as the PCM frames. Unlike a direct callback it
+        # cannot overtake audio still waiting behind the assistant aggregator.
+        if direction == FrameDirection.DOWNSTREAM and isinstance(
+            frame, QwenResponseDoneFrame
+        ):
+            self._cancel_boundary_timeout()
+            async with self._condition:
+                if self._closed or not self._response_active:
+                    logger.debug(
+                        "Ordered Qwen response.done ignored without active "
+                        "paced response=%u generation=%u",
+                        self._response_id,
+                        frame.generation,
+                    )
+                    return
+                self._items.append(
+                    _ControlItem(
+                        LLMFullResponseEndFrame(),
+                        FrameDirection.DOWNSTREAM,
+                        self._response_id,
+                    )
+                )
+                self._response_active = False
+                self._condition.notify_all()
+            logger.info(
+                "Paced response %u received ordered Qwen response.done "
+                "boundary generation=%u",
+                self._response_id,
+                frame.generation,
+            )
+            return
+
         # Only the FULL response end is an audio boundary. OpenAI emits
         # TTSStarted/TTSStopped around sentence-sized subsegments; treating
         # those as boundaries released 350-400 ms fragments and repeatedly
@@ -260,6 +302,12 @@ class PacedAudioSender(FrameProcessor):
         ):
             self._cancel_boundary_timeout()
             async with self._condition:
+                if isinstance(frame, LLMFullResponseEndFrame) and not self._response_active:
+                    logger.debug(
+                        "Duplicate full-response boundary ignored for response=%u",
+                        self._response_id,
+                    )
+                    return
                 self._items.append(_ControlItem(frame, direction, self._response_id))
                 if isinstance(frame, LLMFullResponseEndFrame):
                     self._response_active = False
@@ -334,6 +382,14 @@ class PacedAudioSender(FrameProcessor):
                     if control_to_send.response_id != self._response_id:
                         continue
                     await self.push_frame(control_to_send.frame, control_to_send.direction)
+                    if (
+                        isinstance(control_to_send.frame, LLMFullResponseEndFrame)
+                        and self._on_response_drained is not None
+                    ):
+                        try:
+                            await self._on_response_drained()
+                        except Exception:
+                            logger.exception("Response-drained callback failed")
                     if isinstance(control_to_send.frame, EndFrame):
                         self._closed = True
                         return

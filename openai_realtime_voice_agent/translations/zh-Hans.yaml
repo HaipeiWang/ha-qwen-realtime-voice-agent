@@ -45,8 +45,8 @@ configuration:
     name: "💬 对话 · 唤醒后开麦延迟"
     description: "唤醒音播放后等待再开麦，避免唤醒音回声被当作指令。"
   wake_audio_guard_ms:
-    name: "💬 对话 · 唤醒音频保护窗口"
-    description: "每次唤醒后由后端丢弃排队的唤醒音尾音，防止千问误判为用户开始说话。应小于唤醒后开麦延迟。"
+    name: "💬 对话 · 旧固件唤醒保护窗口"
+    description: "仅用于开麦早于唤醒音结束的旧固件。当前 Voice PE 固件应设为 0，避免丢失指令开头。"
   vad_eagerness:
     name: "💬 对话 · 语句结束灵敏度"
     description: "low 会更耐心等待；high 回复更快，但停顿时可能更容易截断。"

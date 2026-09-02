@@ -1,7 +1,7 @@
-# Qwen Omni Realtime Voice Agent
+# Qwen Realtime Voice Agent
 
 This Home Assistant OS Add-on is the backend for the custom Voice PE firmware
-from [xandervanerven/home-assistant-voice-pe](https://github.com/xandervanerven/home-assistant-voice-pe).
+from [HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen).
 It streams Voice PE audio to Qwen Omni Realtime, streams Qwen audio back to the
 speaker, and controls Home Assistant through MCP and automatically generated
 capability tools.
