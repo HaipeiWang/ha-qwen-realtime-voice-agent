@@ -18,8 +18,13 @@ _MODULE_DIR = (
     else _PROJECT_ROOT
 )
 sys.path.insert(0, str(_MODULE_DIR))
+# qwen_realtime imports sibling modules through the ``app`` package.  Keep the
+# checkout/image source root ahead of the separately installed wheel so a test
+# never mixes a patched qwen_realtime.py with stale site-packages helpers.
+sys.path.insert(0, str(_PROJECT_ROOT))
 
 from qwen_realtime import QwenRealtimeLLMService
+from app.control_intent_router import ControlIntentRouter, EntityCatalog, EntityInfo
 
 
 class _WebSocketStub:
@@ -31,6 +36,48 @@ class _WebSocketStub:
 
 
 class QwenToolProtocolSmokeTest(unittest.TestCase):
+    def test_model_tool_call_drops_conflicting_area_before_mcp_dispatch(self):
+        async def scenario():
+            service = object.__new__(QwenRealtimeLLMService)
+            service.control_router = ControlIntentRouter(EntityCatalog([
+                EntityInfo(name="卧室吸顶灯", domain="light", area="卧室"),
+                EntityInfo(name="客厅吊灯", domain="light", area="卧室"),
+            ]))
+            service._handled_tool_call_ids = set()
+            service._det_executed_results = {}
+            service._function_argument_deltas = {}
+            service._tools_ready = True
+            service._expected_tool_names = {"HassTurnOn"}
+            service._pending_tool_call_ids = set()
+            service._tool_call_generations = {}
+            service._tool_call_seen_for_turn = False
+            service._provider_generation = 7
+            service._context = None
+            service.has_function = lambda name: name == "HassTurnOn"
+            service.run_function_calls = AsyncMock()
+            service._return_tool_failure = AsyncMock()
+
+            await service._handle_function_call({
+                "type": "response.function_call_arguments.done",
+                "call_id": "call-living-room-light",
+                "name": "HassTurnOn",
+                "arguments": json.dumps({
+                    "name": "客厅吊灯",
+                    "area": "客厅",
+                    "domain": ["light"],
+                }, ensure_ascii=False),
+            })
+
+            service.run_function_calls.assert_awaited_once()
+            dispatched = service.run_function_calls.await_args.args[0][0]
+            self.assertEqual(
+                dispatched.arguments,
+                {"name": "客厅吊灯", "domain": ["light"]},
+            )
+            service._return_tool_failure.assert_not_awaited()
+
+        asyncio.run(scenario())
+
     def test_flat_pipecat_tool_is_converted_to_native_qwen_shape(self):
         converted = QwenRealtimeLLMService._to_qwen_tool({
             "type": "function",

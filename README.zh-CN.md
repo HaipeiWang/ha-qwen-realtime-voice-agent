@@ -124,8 +124,11 @@ ws://homeassistant.local:8080/
 主机名或地址以及 Add-on WebSocket 端口。固件 URL 的端口必须与 Add-on 的
 `websocket_port` 保持一致。
 
-Voice PE 启动后应连接 Add-on 并进入空闲 LED 状态。说出配置的唤醒词和指令，
-然后在 Add-on 日志中确认出现转写、千问响应以及相应的工具执行记录。
+Voice PE 启动后应连接 Add-on 并进入空闲 LED 状态。使用唤醒词前，必须在
+**设置 → 设备与服务** 中配置自动发现的 ESPHome 设备，并输入固件使用的 API
+加密密钥。配套固件只在这条经过鉴权的 Home Assistant API 连接建立后启动唤醒词
+检测。完成配对后再说出唤醒词和指令，并在 Add-on 日志中确认出现转写、千问响应
+以及相应的工具执行记录。
 
 完整的安装、验证、调优和故障排查方法请参阅
 [DOCS.md](openai_realtime_voice_agent/DOCS.md)。该详细文档目前为英文，Add-on

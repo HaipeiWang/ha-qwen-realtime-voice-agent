@@ -109,6 +109,14 @@ Install the companion firmware from
    `substitutions.va_url` to the resolvable HAOS host and the configured Add-on
    WebSocket port.
 6. Flash the first replacement firmware over USB. Later updates can use OTA.
+7. In Home Assistant, open **Settings → Devices & services**, configure the newly
+   discovered ESPHome device, and enter the API encryption key stored in the
+   device's private `secrets.yaml`.
+
+Step 7 is required, not optional. The firmware starts `micro_wake_word` from
+`api.on_client_connected`, after Home Assistant has authenticated the ESPHome
+native API connection. Wi-Fi connectivity and a device WebSocket connection to
+this Add-on do not by themselves activate the wake word.
 
 Never place Wi-Fi credentials, OTA passwords, API encryption keys, provider
 keys, or private addresses in this Add-on repository.
@@ -128,7 +136,8 @@ Starting WebSocket server and pipeline
 
 Then verify these scenarios:
 
-1. **Connection:** Voice PE enters the idle LED state and the Add-on reports a
+1. **Connection:** the ESPHome integration reports the paired Voice PE as
+   connected, the device enters the idle LED state, and the Add-on reports a
    device WebSocket connection.
 2. **Conversation:** wake the device and ask a non-control question; speech is
    returned and the device returns to idle.
@@ -183,6 +192,14 @@ Then verify these scenarios:
   device's network.
 - Confirm both sides use the same WebSocket port.
 - Check ESPHome device logs and the Add-on log at the same timestamp.
+
+**Voice PE connects to the Add-on but the wake word does nothing**
+
+- Confirm Home Assistant's ESPHome integration shows the device as connected,
+  not only discovered.
+- Complete **Configure** with the API encryption key from the firmware's private
+  `secrets.yaml`; the firmware deliberately waits for this connection before
+  starting `micro_wake_word`.
 
 **Audio breaks up**
 

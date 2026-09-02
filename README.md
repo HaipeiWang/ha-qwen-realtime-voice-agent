@@ -138,8 +138,12 @@ If that host name is unavailable on your network, set the firmware
 Add-on's `websocket_port` and the firmware URL port identical.
 
 After boot, the Voice PE should connect to the Add-on and enter its idle LED
-state. Say the configured wake word, speak a request, and verify the Add-on log
-shows transcription, a Qwen response, and any tool execution.
+state. Before using the wake word, open **Settings → Devices & services** and
+complete configuration of the discovered ESPHome device with the firmware's API
+encryption key. The companion firmware does not start wake-word detection until
+that authenticated Home Assistant API connection exists. Then say the configured
+wake word, speak a request, and verify the Add-on log shows transcription, a Qwen
+response, and any tool execution.
 
 See [DOCS.md](openai_realtime_voice_agent/DOCS.md) for the complete setup,
 validation, tuning, and troubleshooting guide.

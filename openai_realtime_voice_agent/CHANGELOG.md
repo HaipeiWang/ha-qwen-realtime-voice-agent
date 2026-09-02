@@ -2,6 +2,18 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.10.0-beta.2
+
+### Fixed
+
+- Normalise model-generated Home Assistant control selectors against the
+  Assist-exposed entity catalog before MCP dispatch. When a unique exact or
+  high-confidence friendly name conflicts with an inherited device area, the
+  redundant `area` constraint is removed so the correct named entity is not
+  rejected with `INVALID_AREA`.
+- Keep ambiguous names, area-wide queries, and non-control tools unchanged;
+  selector corrections are logged for diagnosis.
+
 ## 0.10.0-beta.1
 
 ### Added

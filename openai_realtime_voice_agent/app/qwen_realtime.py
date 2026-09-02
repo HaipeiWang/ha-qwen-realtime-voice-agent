@@ -1434,6 +1434,23 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             if not self.has_function(name):
                 raise ValueError(f"no local MCP handler registered for: {name}")
 
+            # Qwen sometimes supplies the correct unique entity name together
+            # with a human room name that conflicts with Home Assistant's
+            # inherited device area.  MCP treats name+area as AND constraints,
+            # so validate the selector against the Assist-exposed catalog before
+            # dispatch.  Ambiguous names and area-wide queries remain untouched.
+            router = self.control_router
+            if router is not None:
+                args, normalization = router.catalog.normalize_control_arguments(
+                    name, args
+                )
+                if normalization is not None:
+                    logger.info(
+                        "Tool selector normalized before MCP: tool=%s details=%s",
+                        name,
+                        normalization,
+                    )
+
             self._handled_tool_call_ids.add(call_id)
             self._pending_tool_call_ids.add(call_id)
             self._tool_call_generations[call_id] = self._provider_generation

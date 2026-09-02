@@ -8,8 +8,10 @@ capability tools.
 
 ## Before starting
 
-Configure your own Qwen API Key and Workspace ID on the **Configuration** page.
-The repository contains no provider credentials or Home Assistant credentials.
+Configure your own Qwen API Key, Workspace ID, matching region, and an enabled
+Realtime model/voice on the **Configuration** page. All are required for the
+native regional Qwen WebSocket; the repository contains no provider credentials
+or Home Assistant credentials.
 
 Add Home Assistant's **Model Context Protocol Server** integration and expose
 only the entities this assistant may control. In the normal HAOS installation,
@@ -30,6 +32,9 @@ The Add-on listens on WebSocket port `8080` by default. The companion firmware
 uses `ws://homeassistant.local:8080/` unless its `va_url` substitution is
 overridden. Both ports must match. Install the device firmware through ESPHome
 Device Builder; the first stock-firmware replacement normally requires USB.
+After flashing, complete the discovered ESPHome integration with the same API
+encryption key used by the firmware. Wake-word detection intentionally starts only
+after that authenticated Home Assistant API connection is established.
 
 For complete installation, configuration, log checks, and troubleshooting, see
 [DOCS.md](DOCS.md).

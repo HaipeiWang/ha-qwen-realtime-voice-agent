@@ -23,6 +23,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Optional
 from urllib import request
 
@@ -39,6 +40,24 @@ CONTROL_DOMAINS = {
     "fan",
     "climate",
     "media_player",
+}
+
+# Tools whose ``name`` selector refers to one controllable Home Assistant
+# entity.  Query tools are deliberately excluded: removing ``area`` from a
+# GetLiveContext request would change the meaning of an area-wide query.
+ENTITY_CONTROL_TOOLS = {
+    "HassTurnOn",
+    "HassTurnOff",
+    "HassLightSet",
+    "HassClimateSetTemperature",
+    "HassFanSetSpeed",
+    "HassSetPosition",
+    "HassStopMoving",
+    "HassClimateSetHvacMode",
+    "HassClimateSetFanMode",
+    "HassClimateSetSwingMode",
+    "HassFanSetPreset",
+    "HassSelectOption",
 }
 
 # Domain -> Chinese keyword hints the user is likely to say.  Used only as a
@@ -159,6 +178,129 @@ class EntityCatalog:
             if entity.name == name:
                 return entity
         return None
+
+    def normalize_control_arguments(self, tool: str, arguments: dict) -> tuple[dict, Optional[dict]]:
+        """Canonicalise one model-generated entity selector before MCP.
+
+        Home Assistant combines ``name`` and ``area`` as AND constraints.  An
+        integration may attach multiple entities to the area of their shared
+        parent device (for example two Bluetooth lights behind one proxy), so
+        Qwen can select the correct unique friendly name while adding a human
+        room name that makes the otherwise valid MCP call fail with
+        ``INVALID_AREA``.
+
+        A unique exact name is authoritative.  A conservative fuzzy match is
+        also accepted when it is both strong and clearly ahead of the runner
+        up.  Only a conflicting area is removed; ambiguous selectors and
+        area-wide queries are returned unchanged.
+        """
+        original = dict(arguments or {})
+        if tool not in ENTITY_CONTROL_TOOLS:
+            return original, None
+        requested_name = original.get("name")
+        if not isinstance(requested_name, str) or not requested_name.strip():
+            return original, None
+
+        domains = self._selector_domains(original.get("domain"))
+        candidates = [
+            entity for entity in self.entities
+            if entity.domain in CONTROL_DOMAINS
+            and (not domains or entity.domain in domains)
+        ]
+        entity, match_kind, confidence = self._unique_name_match(
+            requested_name, candidates
+        )
+        if entity is None:
+            return original, None
+
+        normalized = dict(original)
+        changes: list[str] = []
+        if requested_name != entity.name:
+            normalized["name"] = entity.name
+            changes.append("canonical_name")
+
+        requested_area = original.get("area")
+        catalog_area = entity.area or ""
+        if isinstance(requested_area, str) and requested_area.strip():
+            if not catalog_area or self._normalise_selector(requested_area) != self._normalise_selector(catalog_area):
+                normalized.pop("area", None)
+                changes.append("dropped_conflicting_area")
+
+        if not changes:
+            return original, None
+        return normalized, {
+            "requested_name": requested_name,
+            "resolved_name": entity.name,
+            "requested_area": requested_area if isinstance(requested_area, str) else "",
+            "catalog_area": catalog_area,
+            "match": match_kind,
+            "confidence": round(confidence, 3),
+            "changes": changes,
+        }
+
+    @staticmethod
+    def _normalise_selector(value: str) -> str:
+        return re.sub(
+            r"[^\u4e00-\u9fffA-Za-z0-9]+",
+            "",
+            _to_simplified(value).lower(),
+        )
+
+    @staticmethod
+    def _selector_domains(value) -> set[str]:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("["):
+                try:
+                    value = json.loads(stripped)
+                except json.JSONDecodeError:
+                    value = stripped
+            else:
+                value = stripped
+        if isinstance(value, str):
+            return {value} if value in CONTROL_DOMAINS else set()
+        if isinstance(value, list):
+            return {
+                item for item in value
+                if isinstance(item, str) and item in CONTROL_DOMAINS
+            }
+        return set()
+
+    @classmethod
+    def _unique_name_match(
+        cls, requested_name: str, candidates: list[EntityInfo]
+    ) -> tuple[Optional[EntityInfo], str, float]:
+        requested = cls._normalise_selector(requested_name)
+        if not requested:
+            return None, "", 0.0
+
+        exact = [
+            entity for entity in candidates
+            if cls._normalise_selector(entity.name) == requested
+        ]
+        if len(exact) == 1:
+            return exact[0], "exact", 1.0
+        if exact:
+            return None, "", 0.0
+
+        scored = []
+        for entity in candidates:
+            candidate = cls._normalise_selector(entity.name)
+            if not candidate:
+                continue
+            score = SequenceMatcher(None, requested, candidate).ratio()
+            scored.append((score, entity))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        if not scored:
+            return None, "", 0.0
+        best_score, best = scored[0]
+        second_score = scored[1][0] if len(scored) > 1 else 0.0
+        # A short generic selector such as "客厅" or "灯" must never turn
+        # into a device action.  0.82 accepts harmless filler/ASR variation
+        # ("客厅的吊灯" -> "客厅吊灯") while the 0.15 margin rejects ties.
+        if len(requested) < 4 or best_score < 0.82 or best_score - second_score < 0.15:
+            return None, "", 0.0
+        return best, "fuzzy", best_score
 
     def resolve(self, text: str, domain_hint: Optional[str] = None) -> Optional[EntityInfo]:
         """Pick the most likely controllable entity for an utterance."""
