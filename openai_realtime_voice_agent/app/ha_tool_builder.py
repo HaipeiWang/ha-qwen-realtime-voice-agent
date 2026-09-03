@@ -118,8 +118,11 @@ CAPABILITY_TEMPLATES = {
             "param": "option",
             "attr": "options",
             "core": False,
-            "description": "设置选择型设备的选项（如空调功能模式、风速、摆风、温度显示等）。",
-            "param_desc": "目标选项，必须是该实体支持的选项之一。",
+            "description": (
+                "设置选择型实体的离散选项（如空调功能模式、风速、摆风或温度显示单位）。"
+                "此工具不能设置空调目标温度；数值温度必须使用 HassClimateSetTemperature。"
+            ),
+            "param_desc": "目标离散选项，必须是该实体支持的选项之一，不能填写数值温度。",
             "router": None,
         },
     ],
@@ -265,7 +268,18 @@ def build_generated_tools(
         tool_name = cap["tool"]
         if tool_name not in domain_tool_values:
             continue
-        schema = _build_schema(cap, sorted(domain_tool_values[tool_name]))
+        selectable_names = sorted({
+            entity["name"]
+            for entity in entities
+            if entity["domain"] in CAPABILITY_TEMPLATES
+            and cap in CAPABILITY_TEMPLATES[entity["domain"]]
+            and entity["attrs"].get(cap["attr"])
+        })
+        schema = _build_schema(
+            cap,
+            sorted(domain_tool_values[tool_name]),
+            selectable_names=selectable_names,
+        )
         handler = _make_handler(base_url, token, cap, entities)
         router_rule = None
         router = cap.get("router")
@@ -311,7 +325,9 @@ def _all_capabilities(enabled_ids: Optional[set] = None):
         yield cap
 
 
-def _build_schema(cap: dict, values: list) -> dict:
+def _build_schema(
+    cap: dict, values: list, *, selectable_names: Optional[list[str]] = None
+) -> dict:
     properties = {
         "name": {"type": "string", "description": "设备或实体名称，例如 空调。"},
     }
@@ -321,6 +337,11 @@ def _build_schema(cap: dict, values: list) -> dict:
     # rack positions ...). Keep select free-form and validate in the handler.
     if values and cap.get("tool") != "HassSelectOption":
         param_schema["enum"] = values
+    if cap.get("tool") == "HassSelectOption" and selectable_names:
+        properties["name"]["enum"] = selectable_names
+        properties["name"]["description"] = (
+            "选择型实体的完整名称；必须从枚举中选择，不能使用父设备简称。"
+        )
     properties[cap["param"]] = param_schema
     return {
         "type": "function",
@@ -334,16 +355,19 @@ def _build_schema(cap: dict, values: list) -> dict:
     }
 
 
-def _resolve_entity(entities: list[dict], name: str) -> Optional[dict]:
+def _resolve_entity(
+    entities: list[dict], name: str, *, allow_partial: bool = True
+) -> Optional[dict]:
     name = (name or "").strip()
     if not name:
         return None
     for entity in entities:
         if entity["name"] == name:
             return entity
-    for entity in entities:
-        if name in entity["name"] or entity["name"] in name:
-            return entity
+    if allow_partial:
+        for entity in entities:
+            if name in entity["name"] or entity["name"] in name:
+                return entity
     return None
 
 
@@ -352,7 +376,11 @@ def _make_handler(base_url: str, token: str, cap: dict, entities: list[dict]) ->
         arguments = dict(getattr(params, "arguments", {}) or {})
         name = str(arguments.get("name", "")).strip()
         value = arguments.get(cap["param"])
-        entity = _resolve_entity(entities, name)
+        entity = _resolve_entity(
+            entities,
+            name,
+            allow_partial=cap["tool"] != "HassSelectOption",
+        )
         if entity is None:
             await params.result_callback(
                 json.dumps(

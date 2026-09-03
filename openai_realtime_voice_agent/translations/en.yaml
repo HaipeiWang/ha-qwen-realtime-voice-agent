@@ -77,7 +77,7 @@ configuration:
     description: "Leave empty to use the add-on permission. Use only when an external MCP endpoint requires a token."
   mcp_tool_allowlist:
     name: "🏠 Home Assistant · Tool allow-list"
-    description: "Comma-separated function names exposed to Qwen. The default keeps entity lookup plus light on, off and set functions."
+    description: "Comma-separated function names exposed to Qwen. The default includes entity lookup, on/off, light settings and AC target temperature."
   auto_tool_generation:
     name: "🏠 Home Assistant · Auto tool generation"
     description: "Automatically discover device capabilities and expose extra tools (AC mode/fan/swing, fan preset, select option) to Qwen. On by default."
@@ -93,6 +93,12 @@ configuration:
   max_context_messages:
     name: "⚙️ Advanced · Conversation memory"
     description: "Number of recent messages retained in the local context."
+  qwen_max_tool_calls_per_turn:
+    name: "⚙️ Advanced · Maximum tool calls per turn"
+    description: "Safety limit for all Home Assistant calls produced by one spoken command. The default 8 still allows compound commands."
+  qwen_max_identical_tool_calls:
+    name: "⚙️ Advanced · Repeated tool-call limit"
+    description: "Stops a turn before Qwen repeats the same physical action too many times. The default 2 prevents runaway loops."
   transcription_model:
     name: "⚙️ Advanced · Transcript model"
     description: "Qwen ASR model used for diagnostic transcripts. It does not replace native audio understanding."

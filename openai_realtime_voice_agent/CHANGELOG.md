@@ -2,6 +2,21 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.10.0-beta.3
+
+### Fixed
+
+- Expose Home Assistant's `HassClimateSetTemperature` tool by default and
+  automatically migrate the exact legacy four-tool allow-list retained by
+  existing Add-on installations.
+- Add Qwen-specific Chinese temperature-tool guidance and prevent the generic
+  `HassSelectOption` tool from treating a parent device name or numeric target
+  temperature as a select entity option.
+- Bound every user turn to eight total tool calls and two identical calls. A
+  runaway chain now stops without dispatching the rejected physical action,
+  closes only the provider conversation, and returns Voice PE from the
+  indefinite thinking state.
+
 ## 0.10.0-beta.2
 
 ### Fixed

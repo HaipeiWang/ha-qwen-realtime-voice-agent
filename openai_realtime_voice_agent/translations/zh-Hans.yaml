@@ -70,7 +70,7 @@ configuration:
     description: "内置 MCP 保持留空；仅外部 MCP 服务明确要求时填写。"
   mcp_tool_allowlist:
     name: "🏠 Home Assistant · 工具白名单"
-    description: "暴露给千问的工具名称，逗号分隔。默认包含设备查询、开灯、关灯和调光。"
+    description: "暴露给千问的工具名称，逗号分隔。默认包含设备查询、开关、灯光设置和空调目标温度。"
   auto_tool_generation:
     name: "🏠 Home Assistant · 自动生成设备工具"
     description: "启动时根据已暴露给 Assist 的实体能力生成额外工具，例如空调模式、风速、摆风、净化器预设和 select 选项。"
@@ -86,6 +86,12 @@ configuration:
   max_context_messages:
     name: "⚙️ 高级 · 对话记忆长度"
     description: "本地上下文中保留的最近消息数量。"
+  qwen_max_tool_calls_per_turn:
+    name: "⚙️ 高级 · 单轮工具调用上限"
+    description: "一条语音指令允许执行的 Home Assistant 工具总数。默认 8，足以处理正常的复合指令。"
+  qwen_max_identical_tool_calls:
+    name: "⚙️ 高级 · 重复工具调用上限"
+    description: "千问重复同一物理操作时提前终止本轮。默认 2，用于阻止失控循环。"
   transcription_model:
     name: "⚙️ 高级 · 转写模型"
     description: "仅用于诊断日志的千问 ASR 模型，不替代原生语音理解。"

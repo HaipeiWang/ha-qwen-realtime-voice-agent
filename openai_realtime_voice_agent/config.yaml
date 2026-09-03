@@ -1,5 +1,5 @@
 name: Qwen Realtime Voice Agent
-version: "0.10.0-beta.2"
+version: "0.10.0-beta.3"
 slug: openai_realtime_voice_agent
 description: Native Qwen Realtime speech-to-speech voice agent for Home Assistant Voice PE, with automatic Home Assistant tools.
 url: https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
@@ -112,7 +112,7 @@ options:
   longlived_token: ""
   # Keep the Qwen control surface deterministic by default. This limits tool
   # kinds, not Home Assistant entities; all entity names remain available.
-  mcp_tool_allowlist: "GetLiveContext,HassTurnOn,HassTurnOff,HassLightSet"
+  mcp_tool_allowlist: "GetLiveContext,HassTurnOn,HassTurnOff,HassLightSet,HassClimateSetTemperature"
   # Auto-discover device capabilities and expose extra tools (空调模式/风速/摆风、
   # 净化器预设、select 选项) to Qwen. On by default. The comma list picks which
   # capability types to enable (climate_mode,climate_fan,climate_swing,
@@ -124,6 +124,10 @@ options:
   websocket_port: 8080
   session_reuse_timeout_seconds: 300
   max_context_messages: 12
+  # Safety fuse for provider tool loops. Eight distinct calls still allow a
+  # compound room command; a third identical physical action is never useful.
+  qwen_max_tool_calls_per_turn: 8
+  qwen_max_identical_tool_calls: 2
   transcription_model: "qwen3-asr-flash-realtime"
   # (turn_detection_type + vad_* deliberately have NO defaults here — see the
   # header comment; semantic_vad is the hardwired default in main.py.)
@@ -172,6 +176,8 @@ schema:
   websocket_port: int(1024,65535)
   session_reuse_timeout_seconds: int(0,3600)
   max_context_messages: int(0,100)
+  qwen_max_tool_calls_per_turn: int(1,30)
+  qwen_max_identical_tool_calls: int(1,10)
   transcription_model: str
   transcription_model_custom: str?
   # Legacy server_vad escape hatch — optional, hidden until "Show unused

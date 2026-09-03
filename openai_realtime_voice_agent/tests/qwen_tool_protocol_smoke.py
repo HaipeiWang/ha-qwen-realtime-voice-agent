@@ -98,6 +98,57 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
         )
         self.assertIn("必须调用", converted["function"]["description"])
 
+    def test_climate_temperature_tool_has_unambiguous_native_schema(self):
+        converted = QwenRealtimeLLMService._to_qwen_tool({
+            "type": "function",
+            "name": "HassClimateSetTemperature",
+            "description": "Set target temperature.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "temperature": {"type": "number"},
+                },
+                "required": ["name", "temperature"],
+            },
+        })
+
+        function = converted["function"]
+        self.assertIn("目标温度", function["description"])
+        self.assertIn(
+            "摄氏度",
+            function["parameters"]["properties"]["temperature"]["description"],
+        )
+
+    def test_tool_chain_guard_limits_duplicates_and_total_calls(self):
+        service = object.__new__(QwenRealtimeLLMService)
+        service._max_tool_calls_per_turn = 8
+        service._max_identical_tool_calls = 2
+        service._reset_tool_chain_guard()
+
+        self.assertIsNone(
+            service._tool_chain_rejection("HassTurnOn", {"name": "客厅灯"})
+        )
+        self.assertIsNone(
+            service._tool_chain_rejection("HassTurnOn", {"name": "客厅灯"})
+        )
+        self.assertIn(
+            "identical call repeated",
+            service._tool_chain_rejection("HassTurnOn", {"name": "客厅灯"}),
+        )
+
+        service._reset_tool_chain_guard()
+        for index in range(8):
+            self.assertIsNone(
+                service._tool_chain_rejection(
+                    "GetLiveContext", {"request": f"state-{index}"}
+                )
+            )
+        self.assertIn(
+            "turn produced 9 calls",
+            service._tool_chain_rejection("GetLiveContext", {"request": "state-8"}),
+        )
+
     def test_invalid_flat_tool_is_rejected(self):
         with self.assertRaises(ValueError):
             QwenRealtimeLLMService._to_qwen_tool({

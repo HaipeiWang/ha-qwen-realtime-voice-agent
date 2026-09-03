@@ -82,6 +82,8 @@ AUTO_TOOL_CAPABILITIES=$(config_value 'auto_tool_capabilities')
 WEBSOCKET_PORT=$(config_value 'websocket_port')
 SESSION_REUSE_TIMEOUT_SECONDS=$(config_value 'session_reuse_timeout_seconds')
 MAX_CONTEXT_MESSAGES=$(config_value 'max_context_messages')
+QWEN_MAX_TOOL_CALLS_PER_TURN=$(config_value 'qwen_max_tool_calls_per_turn')
+QWEN_MAX_IDENTICAL_TOOL_CALLS=$(config_value 'qwen_max_identical_tool_calls')
 TRANSCRIPTION_MODEL=$(config_value 'transcription_model')
 
 # --- 🔍 Debug ---
@@ -128,6 +130,8 @@ export AUTO_TOOL_CAPABILITIES
 export WEBSOCKET_PORT
 export SESSION_REUSE_TIMEOUT_SECONDS
 export MAX_CONTEXT_MESSAGES
+export QWEN_MAX_TOOL_CALLS_PER_TURN
+export QWEN_MAX_IDENTICAL_TOOL_CALLS
 export TRANSCRIPTION_MODEL
 export ENABLE_RECORDING
 export QWEN_TOOL_DEBUG

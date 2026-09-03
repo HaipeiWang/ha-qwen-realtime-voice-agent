@@ -61,6 +61,34 @@ def _resolve_choice(env_var: str, custom_env_var: str, default: str) -> str:
 dotenv.load_dotenv()
 
 
+LEGACY_DEFAULT_MCP_TOOL_ALLOWLIST = {
+    "GetLiveContext",
+    "HassTurnOn",
+    "HassTurnOff",
+    "HassLightSet",
+}
+
+
+def _parse_mcp_tool_allowlist(raw_value: str) -> list[str]:
+    """Parse the allow-list and migrate the pre-temperature default.
+
+    Home Assistant preserves saved Add-on options across upgrades. Merely
+    changing config.yaml would therefore leave existing installations without
+    HassClimateSetTemperature forever. Only the exact historic four-tool
+    default is migrated; a genuinely custom allow-list remains authoritative.
+    """
+    tools = [value.strip() for value in (raw_value or "").split(",") if value.strip()]
+    if (
+        len(tools) == len(LEGACY_DEFAULT_MCP_TOOL_ALLOWLIST)
+        and set(tools) == LEGACY_DEFAULT_MCP_TOOL_ALLOWLIST
+    ):
+        tools.append("HassClimateSetTemperature")
+        logger.info(
+            "Migrated legacy MCP tool allow-list: added HassClimateSetTemperature"
+        )
+    return tools
+
+
 class SafeRealtimeLLMService(QwenRealtimeLLMService):
     """OpenAIRealtimeLLMService with audio-truncation-on-interruption disabled.
 
@@ -398,7 +426,9 @@ class Application:
 
         # Optional allow-list to trim the (large) ha-mcp tool set exposed to the
         # model. Comma-separated tool names; empty means expose all.
-        mcp_tool_allowlist = [t.strip() for t in os.environ.get("MCP_TOOL_ALLOWLIST", "").split(",") if t.strip()]
+        mcp_tool_allowlist = _parse_mcp_tool_allowlist(
+            os.environ.get("MCP_TOOL_ALLOWLIST", "")
+        )
         # Auto-generated capability tools (climate mode/fan/swing, fan preset,
         # select option). Default ON; the comma list selects which capability
         # types to enable (ids: climate_mode,climate_fan,climate_swing,

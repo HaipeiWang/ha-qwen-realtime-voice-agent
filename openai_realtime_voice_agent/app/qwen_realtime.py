@@ -76,6 +76,10 @@ CORE_TOOL_DESCRIPTIONS = {
         "设置 Home Assistant 灯光亮度、颜色或色温。用户要求调暗、调亮或改变灯光时，"
         "必须调用此工具后再确认。"
     ),
+    "HassClimateSetTemperature": (
+        "设置 Home Assistant 空调的目标温度。用户说把空调设为多少度、升高或降低到"
+        "某个温度时，必须使用此工具；不得使用 HassSelectOption 代替。"
+    ),
 }
 
 CORE_PROPERTY_DESCRIPTIONS = {
@@ -87,6 +91,12 @@ CORE_PROPERTY_DESCRIPTIONS = {
     "brightness": "灯光亮度百分比，取值 0 到 100。",
     "color": "灯光颜色名称。",
     "temperature": "灯光色温值。",
+}
+
+CORE_TOOL_PROPERTY_DESCRIPTIONS = {
+    ("HassClimateSetTemperature", "temperature"): (
+        "空调目标温度，单位为摄氏度，例如 24。"
+    ),
 }
 
 
@@ -127,6 +137,18 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             )
         except (TypeError, ValueError):
             self._tool_timeout_s = 15.0
+        try:
+            self._max_tool_calls_per_turn = max(
+                1, int(os.getenv("QWEN_MAX_TOOL_CALLS_PER_TURN", "8"))
+            )
+        except (TypeError, ValueError):
+            self._max_tool_calls_per_turn = 8
+        try:
+            self._max_identical_tool_calls = max(
+                1, int(os.getenv("QWEN_MAX_IDENTICAL_TOOL_CALLS", "2"))
+            )
+        except (TypeError, ValueError):
+            self._max_identical_tool_calls = 2
         self._expected_qwen_tools = []
         self._expected_tool_names = set()
         self._tools_ready = False
@@ -135,6 +157,9 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         self._pending_tool_call_ids = set()
         self._notified_assistant_item_ids = set()
         self._tool_call_seen_for_turn = False
+        self._tool_calls_this_turn = 0
+        self._tool_signature_counts = {}
+        self._tool_chain_aborted = False
         self._pending_response_after_tool_result = False
         self._skip_next_response_create = False
         self._tool_unavailable_policy_sent = False
@@ -380,6 +405,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         self._speech_started_generation = None
         self._last_user_transcript = ""
         self._tool_call_seen_for_turn = False
+        self._reset_tool_chain_guard()
         self._tools_ready = False
         self._tool_unavailable_policy_sent = False
         self._function_argument_deltas.clear()
@@ -387,6 +413,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         self._pending_tool_call_ids.clear()
         self._notified_assistant_item_ids.clear()
         self._det_executed_results.clear()
+        self._tool_call_generations.clear()
         self._pending_input_audio.clear()
         self._pending_input_audio_bytes = 0
 
@@ -636,7 +663,9 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         for property_name, property_schema in properties.items():
             if isinstance(property_schema, dict):
                 property_schema = dict(property_schema)
-                chinese_description = CORE_PROPERTY_DESCRIPTIONS.get(property_name)
+                chinese_description = CORE_TOOL_PROPERTY_DESCRIPTIONS.get(
+                    (name, property_name)
+                ) or CORE_PROPERTY_DESCRIPTIONS.get(property_name)
                 if name in CORE_TOOL_DESCRIPTIONS and chinese_description:
                     property_schema["description"] = chinese_description
             qwen_properties[property_name] = property_schema
@@ -989,6 +1018,70 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             task.cancel()
         self._transcript_gate_task = None
 
+    def _reset_tool_chain_guard(self):
+        """Reset bounded tool-chain state at a real user-turn boundary."""
+        self._tool_calls_this_turn = 0
+        self._tool_signature_counts = {}
+        self._tool_chain_aborted = False
+
+    def _tool_chain_rejection(self, name: str, arguments: dict) -> str | None:
+        """Return a reason when a model tool chain has become unsafe.
+
+        A valid compound command may need several distinct tools, so the total
+        cap is deliberately higher than the duplicate cap. Repeating an
+        identical action is both wasteful and potentially unsafe for physical
+        devices; stop before dispatching the third identical call by default.
+        """
+        self._tool_calls_this_turn = getattr(self, "_tool_calls_this_turn", 0) + 1
+        counts = getattr(self, "_tool_signature_counts", None)
+        if counts is None:
+            counts = {}
+            self._tool_signature_counts = counts
+        signature = json.dumps(
+            {"name": name, "arguments": arguments},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        counts[signature] = counts.get(signature, 0) + 1
+        max_total = max(1, getattr(self, "_max_tool_calls_per_turn", 8))
+        max_identical = max(1, getattr(self, "_max_identical_tool_calls", 2))
+        if counts[signature] > max_identical:
+            return (
+                f"identical call repeated {counts[signature]} times "
+                f"(limit {max_identical})"
+            )
+        if self._tool_calls_this_turn > max_total:
+            return (
+                f"turn produced {self._tool_calls_this_turn} calls "
+                f"(limit {max_total})"
+            )
+        return None
+
+    async def _abort_tool_chain(
+        self, call_id: str, name: str, arguments: dict, reason: str
+    ):
+        """End a runaway tool turn safely without dispatching another action."""
+        if getattr(self, "_tool_chain_aborted", False):
+            return
+        self._tool_chain_aborted = True
+        self._handled_tool_call_ids.add(call_id)
+        self._pending_tool_call_ids.discard(call_id)
+        self._function_argument_deltas.pop(call_id, None)
+        logger.error(
+            "Qwen tool-chain circuit breaker opened: reason=%s tool=%s args=%s; "
+            "no further Home Assistant action will run for this turn",
+            reason,
+            name,
+            arguments,
+        )
+        # Returning another tool result is what drives another response.create
+        # cycle. Close the local response boundary and retire only this provider
+        # conversation; Voice PE stays online and the next wake opens a clean
+        # Qwen session instead of displaying `thinking` indefinitely.
+        await self._reset_failed_response(f"tool-chain circuit breaker: {reason}")
+        self.schedule_conversation_close(0.0, "tool-chain circuit breaker")
+
     def begin_wake_turn(self, guard_ms: int = 0):
         """Start a hard input generation boundary for a device wake.
 
@@ -1001,6 +1094,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         self._wake_guard_until = time.monotonic() + max(0, guard_ms) / 1000.0
         self._last_user_transcript = ""
         self._tool_call_seen_for_turn = False
+        self._reset_tool_chain_guard()
         self._det_executed_results.clear()
         self._cancel_transcript_gate()
         logger.info(
@@ -1405,21 +1499,14 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                 raise ValueError("missing call_id")
             if not isinstance(name, str) or not name:
                 raise ValueError("missing function name")
-            # The deterministic router may have already executed this tool for
-            # the current turn (using the exact, catalog-resolved entity name).
-            # The model then hears the user's audio again and emits its own
-            # duplicate call — often with a truncated name that would fail HA
-            # matching.  Return the cached result instead of executing twice.
-            if name in self._det_executed_results:
+            if getattr(self, "_tool_chain_aborted", False):
                 self._handled_tool_call_ids.add(call_id)
-                self._tool_call_seen_for_turn = True
-                self._tool_call_generations[call_id] = self._provider_generation
                 self._function_argument_deltas.pop(call_id, None)
                 logger.info(
-                    "Deterministic duplicate skipped: tool=%s call_id=%s (returning cached result)",
-                    name, call_id,
+                    "Ignoring Qwen tool call after circuit breaker: tool=%s call_id=%s",
+                    name,
+                    call_id,
                 )
-                await self._send_tool_result(call_id, self._det_executed_results[name])
                 return
             arguments = event.get("arguments")
             if not isinstance(arguments, str):
@@ -1450,6 +1537,28 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                         name,
                         normalization,
                     )
+
+            rejection = self._tool_chain_rejection(name, args)
+            if rejection is not None:
+                await self._abort_tool_chain(call_id, name, args, rejection)
+                return
+
+            # The deterministic router may have already executed this tool for
+            # the current turn (using the exact, catalog-resolved entity name).
+            # Count this model call in the safety guard first, then return the
+            # cached result instead of executing the physical action twice.
+            if name in self._det_executed_results:
+                self._handled_tool_call_ids.add(call_id)
+                self._tool_call_seen_for_turn = True
+                self._tool_call_generations[call_id] = self._provider_generation
+                self._function_argument_deltas.pop(call_id, None)
+                logger.info(
+                    "Deterministic duplicate skipped: tool=%s call_id=%s (returning cached result)",
+                    name,
+                    call_id,
+                )
+                await self._send_tool_result(call_id, self._det_executed_results[name])
+                return
 
             self._handled_tool_call_ids.add(call_id)
             self._pending_tool_call_ids.add(call_id)
@@ -1545,6 +1654,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             self._notified_assistant_item_ids.clear()
             self._function_argument_deltas.clear()
             self._det_executed_results.clear()
+            self._reset_tool_chain_guard()
             self._skip_next_response_create = False
             self._response_boundary_open = False
             self._response_create_inflight = False
@@ -1572,6 +1682,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                 return
             self._speech_started_generation = self._turn_generation
             self._tool_call_seen_for_turn = False
+            self._reset_tool_chain_guard()
             self._last_user_transcript = ""
             self._det_executed_results.clear()
             self._cancel_transcript_gate()
