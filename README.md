@@ -8,11 +8,44 @@
 
 # Qwen Realtime Voice Agent for Home Assistant Voice PE
 
-A Home Assistant OS Add-on that connects custom Voice PE firmware directly to
-Alibaba Cloud Model Studio **Qwen Omni Realtime**. Microphone audio goes to the
-native Qwen Realtime WebSocket, Qwen streams speech back to the Voice PE, and
-Home Assistant devices are controlled through MCP plus capability tools built
-automatically from the entities the user exposed to Assist.
+## What it can do
+
+- Turn a Home Assistant Voice PE into a native **Qwen Realtime** voice
+  assistant without a separate Whisper or Piper pipeline.
+- Understand natural spoken requests, stream spoken answers, show conversation
+  state through the Voice PE LEDs, and support center-button interruption and
+  follow-up conversation.
+- Discover Home Assistant MCP tools automatically and control only entities
+  exposed to Assist, including lights, switches, covers, climate devices and
+  other supported domains.
+- Generate extra tools from real entity capabilities for climate mode, fan
+  speed, swing mode, fan presets and select options.
+- Route common device commands deterministically and confirm actions only after
+  Home Assistant returns the execution result.
+- Prefer an exact, unique entity name when an inherited or incorrect HA area
+  conflicts with that name—for example, a living-room light attached through a
+  Bluetooth proxy assigned to another room.
+- Pace and buffer streamed audio, recover provider connections, and optionally
+  record diagnostic audio for troubleshooting.
+
+## What's new in 0.10.0-beta.4
+
+- Compatible with both legacy Home Assistant MCP tool names and the namespaced
+  names introduced by Home Assistant Core 2026.9.
+- Automatically uses `homeassistant__GetLiveContext` on new Core releases and
+  falls back to `GetLiveContext` on older releases.
+- Keeps the actual MCP wire name for execution while applying routing, Chinese
+  tool guidance, loop protection and entity-selector normalization to one
+  stable canonical name.
+- Preserves exact-name priority and conflicting-area removal, so the Core 2026.9
+  compatibility change does not reintroduce incorrect device selection.
+
+## How it works
+
+The Add-on connects the companion Voice PE firmware directly to Alibaba Cloud
+Model Studio Qwen Realtime. Microphone audio goes to the native Qwen Realtime
+WebSocket, speech streams back to the Voice PE, and device actions use MCP plus
+capability tools built from entities exposed to Assist.
 
 ```text
 Voice PE custom firmware               Home Assistant OS Add-on
@@ -24,21 +57,6 @@ Voice PE custom firmware               Home Assistant OS Add-on
                                                     ▼
                                            Home Assistant entities
 ```
-
-## Features
-
-- Native speech-to-speech Qwen Realtime connection; no separate Whisper or
-  Piper path.
-- Voice PE wake word, wake chime, LEDs, center-button interruption, follow-up
-  conversation, and streamed speaker audio.
-- Home Assistant MCP tools discovered on every Add-on start.
-- Additional capability tools generated automatically for supported exposed
-  entities: climate mode/fan/swing, fan presets, and select options.
-- Deterministic routing for common device commands and result-aware spoken
-  confirmation, reducing verbal false successes.
-- Paced audio delivery, playback buffering, reconnect handling, and optional
-  diagnostic audio recording.
-- English and Simplified Chinese Add-on configuration descriptions.
 
 ## Requirements
 
@@ -105,7 +123,8 @@ and falls back with an explicit error if a voice does not match the model.
 4. Leave **Auto tool generation** enabled. At startup the Add-on:
 
    - obtains the official MCP tools;
-   - reads `GetLiveContext` to determine the Assist-exposed entity boundary;
+   - reads the compatible `GetLiveContext` tool to determine the Assist-exposed
+     entity boundary;
    - reads those entities' Home Assistant capabilities;
    - builds and registers the extra function tools supported by those devices.
 
@@ -113,7 +132,7 @@ Start the Add-on. A healthy log includes messages similar to:
 
 ```text
 Home Assistant MCP Client initialized
-Entity catalog built: ... exposed entities
+Entity catalog built through ...GetLiveContext: ... exposed entities
 Auto-generated ... capability tools
 Qwen Realtime Service created
 Starting WebSocket server and pipeline

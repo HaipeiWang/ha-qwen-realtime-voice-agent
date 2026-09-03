@@ -8,10 +8,36 @@
 
 # 适用于 Home Assistant Voice PE 的通义千问 Realtime 语音助手
 
-这是一个 Home Assistant OS Add-on，可将运行定制固件的 Voice PE 直接连接到
-阿里云百炼 **Qwen Omni Realtime**。设备的麦克风音频通过千问原生 Realtime
-WebSocket 上传，千问生成的语音流直接返回 Voice PE；Home Assistant 设备则通过
-MCP 以及根据 Assist 已公开实体自动生成的能力工具进行控制。
+## 它能做什么
+
+- 将 Home Assistant Voice PE 变成原生 **Qwen Realtime** 语音助手，不再经过
+  独立的 Whisper 和 Piper 链路。
+- 理解自然语音、流式播放回复，通过 Voice PE 灯光显示会话状态，并支持中心按键
+  打断和连续对话。
+- 自动发现 Home Assistant MCP 工具，只控制向 Assist 公开的实体，包括灯、开关、
+  窗帘、空调及其他受支持设备。
+- 根据实体的真实能力自动生成空调模式、风速、扫风、风扇预设和选项选择工具。
+- 对常见设备控制进行确定性路由，并在 Home Assistant 返回真实执行结果后才确认成功。
+- 当设备名称准确且唯一、但 Home Assistant 继承的区域错误时优先采用设备名称。例如，
+  通过同一 Bluetooth Proxy 接入、却被归入错误房间的客厅灯仍可被正确选中。
+- 对流式音频进行匀速发送和缓冲，支持连接恢复及可选诊断录音。
+
+## 0.10.0-beta.4 更新内容
+
+- 同时兼容旧版 Home Assistant MCP 工具名和 Home Assistant Core 2026.9 引入的
+  命名空间工具名。
+- 新版 Core 自动使用 `homeassistant__GetLiveContext`，旧版自动回退到
+  `GetLiveContext`。
+- 执行时保留 MCP 返回的真实工具名；路由、中文工具说明、循环保护和实体选择器则使用
+  稳定的统一名称。
+- 保留“准确唯一名称优先”和“移除冲突区域”的 Harness 规则，不会因为兼容新版
+  工具名而再次选错设备。
+
+## 工作原理
+
+Add-on 将配套 Voice PE 固件直接连接到阿里云百炼 Qwen Realtime。麦克风音频通过
+千问原生 Realtime WebSocket 上传，语音回复流式返回 Voice PE；设备操作则通过 MCP
+以及根据 Assist 已公开实体自动生成的能力工具完成。
 
 ```text
 Voice PE 定制固件                       Home Assistant OS Add-on
@@ -23,16 +49,6 @@ Voice PE 定制固件                       Home Assistant OS Add-on
                                                     ▼
                                            Home Assistant 实体
 ```
-
-## 功能
-
-- 原生语音到语音的 Qwen Realtime 连接，不需要单独部署 Whisper 或 Piper。
-- 支持 Voice PE 唤醒词、唤醒提示音、LED 状态、中心按键打断、连续对话和流式语音播放。
-- 每次 Add-on 启动时自动发现 Home Assistant MCP 工具。
-- 根据已公开实体自动生成额外的能力工具，包括空调模式、风速、扫风、风扇预设和选项选择。
-- 对常见设备控制指令进行确定性路由，并根据真实执行结果生成语音确认，减少“未执行先确认”。
-- 提供匀速音频下发、播放缓冲、断线重连和可选的诊断录音。
-- Add-on 配置说明同时支持英文和简体中文。
 
 ## 使用条件
 
@@ -93,7 +109,7 @@ voice_id），Qwen3.5 Omni 使用只包含 Omni 音色的下拉菜单。后端�
 4. 保持 **自动生成工具** 开启。Add-on 启动时会：
 
    - 获取官方 MCP 工具；
-   - 通过 `GetLiveContext` 确定向 Assist 公开的实体边界；
+   - 通过兼容的 `GetLiveContext` 工具确定向 Assist 公开的实体边界；
    - 读取这些实体在 Home Assistant 中的能力；
    - 生成并注册相应设备支持的扩展函数工具。
 
@@ -101,7 +117,7 @@ voice_id），Qwen3.5 Omni 使用只包含 Omni 音色的下拉菜单。后端�
 
 ```text
 Home Assistant MCP Client initialized
-Entity catalog built: ... exposed entities
+Entity catalog built through ...GetLiveContext: ... exposed entities
 Auto-generated ... capability tools
 Qwen Realtime Service created
 Starting WebSocket server and pipeline

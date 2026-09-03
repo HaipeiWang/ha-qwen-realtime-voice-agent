@@ -72,7 +72,9 @@ Leave **Auto tool generation** enabled unless diagnosing a device integration.
 Each Add-on start performs this sequence:
 
 1. Connect to Home Assistant's MCP server and obtain its function schemas.
-2. Call MCP `GetLiveContext` to build the list of entities exposed to Assist.
+2. Call MCP `homeassistant__GetLiveContext` on Home Assistant Core 2026.9 or
+   newer, with automatic fallback to legacy `GetLiveContext`, to build the list
+   of entities exposed to Assist.
 3. Read Home Assistant capability attributes for those exposed entities.
 4. Generate only the extra functions supported by the discovered entities.
 5. Register MCP and generated handlers in the Qwen Realtime session.
@@ -127,7 +129,7 @@ Start the Add-on before booting or restarting the Voice PE. Check for:
 
 ```text
 Home Assistant MCP Client initialized
-Entity catalog built: <count> exposed entities
+Entity catalog built through <compatible GetLiveContext name>: <count> exposed entities
 Capability discovery: ...
 Auto-generated <count> capability tools
 Qwen Realtime Service created
