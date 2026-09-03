@@ -27,6 +27,8 @@ from difflib import SequenceMatcher
 from typing import Optional
 from urllib import request
 
+from app.tool_names import canonical_tool_name
+
 logger = logging.getLogger(__name__)
 
 
@@ -195,7 +197,7 @@ class EntityCatalog:
         area-wide queries are returned unchanged.
         """
         original = dict(arguments or {})
-        if tool not in ENTITY_CONTROL_TOOLS:
+        if canonical_tool_name(tool) not in ENTITY_CONTROL_TOOLS:
             return original, None
         requested_name = original.get("name")
         if not isinstance(requested_name, str) or not requested_name.strip():
@@ -716,28 +718,43 @@ def build_catalog_from_ha(
     before.
     """
     last_error = "unknown"
+    live_context_names = (
+        "homeassistant__GetLiveContext",
+        "GetLiveContext",
+    )
     for attempt in range(1, max(1, retries) + 1):
-        try:
-            text = _call_mcp_tool(mcp_url, access_token, "GetLiveContext", {}, timeout)
-            if text:
-                parsed = _extract_live_context_result(text)
-                catalog = EntityCatalog.from_live_context_text(parsed)
-                if catalog.entities:
-                    logger.info(
-                        "Entity catalog built: %u exposed entities "
-                        "(%u controllable) on attempt %d",
-                        len(catalog.entities),
-                        sum(1 for e in catalog.entities if e.domain in CONTROL_DOMAINS),
-                        attempt,
-                    )
-                    return catalog
-            last_error = "empty GetLiveContext result"
-        except Exception as e:  # noqa: BLE001 - we retry, then degrade safely
-            last_error = repr(e)
-            logger.warning(
-                "Entity catalog build attempt %d/%d failed: %s",
-                attempt, retries, e,
-            )
+        for tool_name in live_context_names:
+            try:
+                text = _call_mcp_tool(
+                    mcp_url, access_token, tool_name, {}, timeout
+                )
+                if text:
+                    parsed = _extract_live_context_result(text)
+                    catalog = EntityCatalog.from_live_context_text(parsed)
+                    if catalog.entities:
+                        logger.info(
+                            "Entity catalog built through %s: %u exposed entities "
+                            "(%u controllable) on attempt %d",
+                            tool_name,
+                            len(catalog.entities),
+                            sum(
+                                1
+                                for entity in catalog.entities
+                                if entity.domain in CONTROL_DOMAINS
+                            ),
+                            attempt,
+                        )
+                        return catalog
+                last_error = f"empty {tool_name} result"
+            except Exception as e:  # noqa: BLE001 - try the compatibility name
+                last_error = f"{tool_name}: {e!r}"
+                logger.info(
+                    "Entity catalog tool %s unavailable on attempt %d/%d: %s",
+                    tool_name,
+                    attempt,
+                    retries,
+                    e,
+                )
         if attempt < retries:
             time.sleep(retry_delay)
     logger.warning(

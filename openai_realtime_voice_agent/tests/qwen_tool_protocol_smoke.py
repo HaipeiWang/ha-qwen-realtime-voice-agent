@@ -47,20 +47,20 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
             service._det_executed_results = {}
             service._function_argument_deltas = {}
             service._tools_ready = True
-            service._expected_tool_names = {"HassTurnOn"}
+            service._expected_tool_names = {"intent__HassTurnOn"}
             service._pending_tool_call_ids = set()
             service._tool_call_generations = {}
             service._tool_call_seen_for_turn = False
             service._provider_generation = 7
             service._context = None
-            service.has_function = lambda name: name == "HassTurnOn"
+            service.has_function = lambda name: name == "intent__HassTurnOn"
             service.run_function_calls = AsyncMock()
             service._return_tool_failure = AsyncMock()
 
             await service._handle_function_call({
                 "type": "response.function_call_arguments.done",
                 "call_id": "call-living-room-light",
-                "name": "HassTurnOn",
+                "name": "intent__HassTurnOn",
                 "arguments": json.dumps({
                     "name": "客厅吊灯",
                     "area": "客厅",
@@ -70,6 +70,7 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
 
             service.run_function_calls.assert_awaited_once()
             dispatched = service.run_function_calls.await_args.args[0][0]
+            self.assertEqual(dispatched.function_name, "intent__HassTurnOn")
             self.assertEqual(
                 dispatched.arguments,
                 {"name": "客厅吊灯", "domain": ["light"]},
@@ -97,6 +98,35 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
             converted["function"]["parameters"]["required"], ["name"]
         )
         self.assertIn("必须调用", converted["function"]["description"])
+
+    def test_namespaced_tool_keeps_canonical_chinese_description(self):
+        converted = QwenRealtimeLLMService._to_qwen_tool({
+            "type": "function",
+            "name": "intent__HassTurnOff",
+            "description": "Turn an entity off.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        })
+
+        self.assertEqual(
+            converted["function"]["name"], "intent__HassTurnOff"
+        )
+        self.assertIn("必须调用", converted["function"]["description"])
+
+    def test_deterministic_router_resolves_canonical_to_wire_name(self):
+        service = object.__new__(QwenRealtimeLLMService)
+        service._wire_tool_names_by_canonical = {
+            "HassTurnOn": "intent__HassTurnOn"
+        }
+        self.assertEqual(
+            service._wire_tool_name("HassTurnOn"), "intent__HassTurnOn"
+        )
+        self.assertEqual(
+            service._wire_tool_name("HassLightSet"), "HassLightSet"
+        )
 
     def test_climate_temperature_tool_has_unambiguous_native_schema(self):
         converted = QwenRealtimeLLMService._to_qwen_tool({

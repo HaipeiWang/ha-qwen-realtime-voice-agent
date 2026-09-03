@@ -2,6 +2,20 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.10.0-beta.4
+
+### Fixed
+
+- Support both legacy Home Assistant LLM tool names and the integration-domain
+  names introduced by Home Assistant Core 2026.9, while retaining the exact
+  wire name for MCP execution.
+- Restore the exposed-entity catalog on Core 2026.9 by preferring
+  `homeassistant__GetLiveContext` with an automatic `GetLiveContext` fallback
+  for older Core versions.
+- Keep selector normalization, inherited-area conflict removal, deterministic
+  routing, Chinese tool guidance and loop protection keyed by canonical tool
+  names, so namespace compatibility cannot bypass the existing safety harness.
+
 ## 0.10.0-beta.3
 
 ### Fixed

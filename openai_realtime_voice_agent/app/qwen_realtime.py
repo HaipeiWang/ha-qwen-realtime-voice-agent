@@ -37,6 +37,7 @@ from websockets.asyncio.client import connect as websocket_connect
 
 from app.control_intent_router import ControlIntentRouter, EntityCatalog, Intent
 from app.qwen_frames import QwenResponseDoneFrame
+from app.tool_names import canonical_tool_name, canonical_wire_map
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             self._max_identical_tool_calls = 2
         self._expected_qwen_tools = []
         self._expected_tool_names = set()
+        self._wire_tool_names_by_canonical = {}
         self._tools_ready = False
         self._function_argument_deltas = {}
         self._handled_tool_call_ids = set()
@@ -650,8 +652,9 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         if not isinstance(properties, dict) or not isinstance(required, list):
             raise ValueError(f"{name}: invalid properties/required JSON schema")
 
+        canonical_name = canonical_tool_name(name)
         description = CORE_TOOL_DESCRIPTIONS.get(
-            name, function.get("description") or ""
+            canonical_name, function.get("description") or ""
         )
         # HA MCP's generic schemas are intentionally provider-neutral and many
         # selector fields have no descriptions.  Qwen's Chinese audio model was
@@ -664,9 +667,9 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             if isinstance(property_schema, dict):
                 property_schema = dict(property_schema)
                 chinese_description = CORE_TOOL_PROPERTY_DESCRIPTIONS.get(
-                    (name, property_name)
+                    (canonical_name, property_name)
                 ) or CORE_PROPERTY_DESCRIPTIONS.get(property_name)
-                if name in CORE_TOOL_DESCRIPTIONS and chinese_description:
+                if canonical_name in CORE_TOOL_DESCRIPTIONS and chinese_description:
                     property_schema["description"] = chinese_description
             qwen_properties[property_name] = property_schema
 
@@ -840,6 +843,17 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
 
         self._expected_qwen_tools = qwen_tools
         self._expected_tool_names = self._qwen_tool_names(qwen_tools)
+        self._wire_tool_names_by_canonical = canonical_wire_map(
+            self._expected_tool_names
+        )
+        execution_policy = TOOL_EXECUTION_POLICY
+        live_context_wire_name = self._wire_tool_names_by_canonical.get(
+            "GetLiveContext", "GetLiveContext"
+        )
+        if live_context_wire_name != "GetLiveContext":
+            execution_policy = execution_policy.replace(
+                "GetLiveContext", live_context_wire_name
+            )
         if not qwen_tools:
             logger.error(
                 "QWEN TOOL REGISTRATION FAILED: zero valid tools before session.update; "
@@ -854,7 +868,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             part for part in (
                 getattr(settings, "instructions", "") or "",
                 self._build_entity_catalog_hint(),
-                TOOL_EXECUTION_POLICY,
+                execution_policy,
                 TOOL_UNAVAILABLE_POLICY if not qwen_tools else "",
             ) if part
         )
@@ -1024,6 +1038,12 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         self._tool_signature_counts = {}
         self._tool_chain_aborted = False
 
+    def _wire_tool_name(self, canonical_name: str) -> str:
+        """Resolve a policy/router name to the registered MCP wire name."""
+        return getattr(self, "_wire_tool_names_by_canonical", {}).get(
+            canonical_tool_name(canonical_name), canonical_name
+        )
+
     def _tool_chain_rejection(self, name: str, arguments: dict) -> str | None:
         """Return a reason when a model tool chain has become unsafe.
 
@@ -1038,7 +1058,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             counts = {}
             self._tool_signature_counts = counts
         signature = json.dumps(
-            {"name": name, "arguments": arguments},
+            {"name": canonical_tool_name(name), "arguments": arguments},
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -1142,21 +1162,25 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         intent = router.resolve(transcript)
         if intent is None:
             return False
-        if not self.has_function(intent.tool):
+        wire_tool = self._wire_tool_name(intent.tool)
+        if not self.has_function(wire_tool):
             logger.warning(
-                "Deterministic intent tool %s is not registered; deferring to model",
+                "Deterministic intent tool %s (wire=%s) is not registered; deferring to model",
                 intent.tool,
+                wire_tool,
             )
             return False
         logger.info(
-            "Deterministic control intent resolved: tool=%s args=%s",
-            intent.tool, intent.arguments,
+            "Deterministic control intent resolved: tool=%s wire=%s args=%s",
+            intent.tool,
+            wire_tool,
+            intent.arguments,
         )
-        result = await self._execute_ha_tool_locally(intent.tool, intent.arguments)
+        result = await self._execute_ha_tool_locally(wire_tool, intent.arguments)
         if result is None:
             logger.error("Deterministic tool execution failed: tool=%s", intent.tool)
             return False
-        self._det_executed_results[intent.tool] = result
+        self._det_executed_results[canonical_tool_name(intent.tool)] = result
         await self._speak_deterministic_confirmation(intent, result)
         return True
 
@@ -1499,6 +1523,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                 raise ValueError("missing call_id")
             if not isinstance(name, str) or not name:
                 raise ValueError("missing function name")
+            canonical_name = canonical_tool_name(name)
             if getattr(self, "_tool_chain_aborted", False):
                 self._handled_tool_call_ids.add(call_id)
                 self._function_argument_deltas.pop(call_id, None)
@@ -1529,7 +1554,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             router = self.control_router
             if router is not None:
                 args, normalization = router.catalog.normalize_control_arguments(
-                    name, args
+                    canonical_name, args
                 )
                 if normalization is not None:
                     logger.info(
@@ -1538,7 +1563,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                         normalization,
                     )
 
-            rejection = self._tool_chain_rejection(name, args)
+            rejection = self._tool_chain_rejection(canonical_name, args)
             if rejection is not None:
                 await self._abort_tool_chain(call_id, name, args, rejection)
                 return
@@ -1547,7 +1572,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             # the current turn (using the exact, catalog-resolved entity name).
             # Count this model call in the safety guard first, then return the
             # cached result instead of executing the physical action twice.
-            if name in self._det_executed_results:
+            if canonical_name in self._det_executed_results:
                 self._handled_tool_call_ids.add(call_id)
                 self._tool_call_seen_for_turn = True
                 self._tool_call_generations[call_id] = self._provider_generation
@@ -1557,7 +1582,9 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                     name,
                     call_id,
                 )
-                await self._send_tool_result(call_id, self._det_executed_results[name])
+                await self._send_tool_result(
+                    call_id, self._det_executed_results[canonical_name]
+                )
                 return
 
             self._handled_tool_call_ids.add(call_id)

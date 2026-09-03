@@ -24,6 +24,7 @@ from app.control_intent_router import (
     build_catalog_from_ha,
 )
 from app.ha_tool_builder import GeneratedTool, build_generated_tools
+from app.tool_names import canonical_tool_name, tool_allowed
 
 # Configure logging
 logging.basicConfig(
@@ -723,7 +724,9 @@ class Application:
                     # with ha-mcp's 80+ tools.
                     exposed = 0
                     for function_schema in mcp_tools_schema.standard_tools:
-                        if self.mcp_tool_allowlist and function_schema.name not in self.mcp_tool_allowlist:
+                        if self.mcp_tool_allowlist and not tool_allowed(
+                            function_schema.name, self.mcp_tool_allowlist
+                        ):
                             continue
                         openai_tool = {
                             "type": "function",
@@ -749,13 +752,17 @@ class Application:
             # preset, select option) — appended on top of the MCP tools. Tools
             # whose names collide with the MCP set are skipped.
             added_generated: list[GeneratedTool] = []
-            mcp_names = {t.get("name") for t in all_tools if isinstance(t, dict)}
+            mcp_names = {
+                canonical_tool_name(t.get("name"))
+                for t in all_tools
+                if isinstance(t, dict)
+            }
             for gen in getattr(self, "generated_tools", []) or []:
-                if gen.name in mcp_names:
+                if canonical_tool_name(gen.name) in mcp_names:
                     logger.info("Skipping auto tool %s (collides with MCP tool)", gen.name)
                     continue
                 all_tools.append(gen.schema)
-                mcp_names.add(gen.name)
+                mcp_names.add(canonical_tool_name(gen.name))
                 added_generated.append(gen)
             if added_generated:
                 logger.info(

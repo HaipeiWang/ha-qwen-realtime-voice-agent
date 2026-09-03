@@ -3,11 +3,16 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from app.control_intent_router import EntityCatalog, EntityInfo
+from app.control_intent_router import (
+    EntityCatalog,
+    EntityInfo,
+    build_catalog_from_ha,
+)
 
 
 class EntitySelectorNormalizationTest(unittest.TestCase):
@@ -26,6 +31,15 @@ class EntitySelectorNormalizationTest(unittest.TestCase):
 
         self.assertEqual(args, {"name": "客厅吊灯", "domain": ["light"]})
         self.assertEqual(info["match"], "exact")
+        self.assertIn("dropped_conflicting_area", info["changes"])
+
+    def test_namespaced_tool_keeps_area_conflict_fallback(self):
+        args, info = self.catalog.normalize_control_arguments(
+            "intent__HassTurnOn",
+            {"name": "客厅吊灯", "area": "客厅", "domain": ["light"]},
+        )
+
+        self.assertEqual(args, {"name": "客厅吊灯", "domain": ["light"]})
         self.assertIn("dropped_conflicting_area", info["changes"])
 
     def test_matching_area_is_preserved(self):
@@ -69,6 +83,47 @@ class EntitySelectorNormalizationTest(unittest.TestCase):
 
         self.assertEqual(args, original)
         self.assertIsNone(info)
+
+    def test_catalog_prefers_new_live_context_name(self):
+        live_context = """- names: 客厅吊灯
+  domain: light
+  state: 'off'
+  areas: 卧室
+"""
+        with patch(
+            "app.control_intent_router._call_mcp_tool",
+            return_value=live_context,
+        ) as call:
+            catalog = build_catalog_from_ha(
+                "http://home-assistant/api/mcp",
+                "unused",
+                retries=1,
+            )
+
+        self.assertEqual(catalog.entities[0].name, "客厅吊灯")
+        self.assertEqual(
+            call.call_args.args[2], "homeassistant__GetLiveContext"
+        )
+
+    def test_catalog_falls_back_to_legacy_live_context_name(self):
+        live_context = """- names: 卧室吸顶灯
+  domain: light
+  state: 'on'
+  areas: 卧室
+"""
+        with patch(
+            "app.control_intent_router._call_mcp_tool",
+            side_effect=[ValueError("unknown new tool"), live_context],
+        ) as call:
+            catalog = build_catalog_from_ha(
+                "http://home-assistant/api/mcp",
+                "unused",
+                retries=1,
+            )
+
+        self.assertEqual(catalog.entities[0].name, "卧室吸顶灯")
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(call.call_args.args[2], "GetLiveContext")
 
 
 if __name__ == "__main__":
