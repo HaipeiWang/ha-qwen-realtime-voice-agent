@@ -2,6 +2,27 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.10.0-beta.5
+
+### Fixed
+
+- Parse Home Assistant tool allow-lists saved with commas, whitespace, newlines
+  or localized separators, and migrate the historical four- and five-tool
+  defaults to the complete safe control set.
+- Keep deterministic-router dependencies, default exposure and Core namespace
+  resolution in one tool policy. Startup now reports discovered, configured,
+  matched and missing tools before a Qwen session is created.
+- Build Qwen's tool policy from the tools actually registered in that session,
+  preventing calls to unavailable tools such as a filtered-out temperature or
+  power function.
+- Expose fan-speed and stop-moving tools required by the existing deterministic
+  router, alongside power, light and climate-temperature controls.
+- Verify asynchronous Home Assistant capability state after a service request;
+  an empty REST response is no longer treated as a false failure when the
+  physical device changed successfully.
+- Keep reply playback protected until the paced output queue drains, preventing
+  late microphone/VAD events from cutting off a completed Qwen response.
+
 ## 0.10.0-beta.4
 
 ### Fixed

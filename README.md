@@ -28,17 +28,16 @@
 - Pace and buffer streamed audio, recover provider connections, and optionally
   record diagnostic audio for troubleshooting.
 
-## What's new in 0.10.0-beta.4
+## What's new in 0.10.0-beta.5
 
-- Compatible with both legacy Home Assistant MCP tool names and the namespaced
-  names introduced by Home Assistant Core 2026.9.
-- Automatically uses `homeassistant__GetLiveContext` on new Core releases and
-  falls back to `GetLiveContext` on older releases.
-- Keeps the actual MCP wire name for execution while applying routing, Chinese
-  tool guidance, loop protection and entity-selector normalization to one
-  stable canonical name.
-- Preserves exact-name priority and conflicting-area removal, so the Core 2026.9
-  compatibility change does not reintroduce incorrect device selection.
+- Repairs allow-lists saved with spaces, commas or newlines and maps legacy tool
+  names to the namespaced names returned by current Home Assistant Core.
+- Uses one safe tool policy for discovery, deterministic routing and Qwen
+  instructions, with startup validation for every configured tool.
+- Restores power control (including Apple TV), climate target temperature, fan
+  speed and stop-moving commands without device-specific tool patches.
+- Verifies asynchronous device state before speaking a result and protects
+  paced reply audio from late VAD events until playback has fully drained.
 
 ## How it works
 

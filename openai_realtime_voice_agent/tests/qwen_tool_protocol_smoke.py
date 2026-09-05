@@ -24,7 +24,12 @@ sys.path.insert(0, str(_MODULE_DIR))
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from qwen_realtime import QwenRealtimeLLMService
-from app.control_intent_router import ControlIntentRouter, EntityCatalog, EntityInfo
+from app.control_intent_router import (
+    ControlIntentRouter,
+    EntityCatalog,
+    EntityInfo,
+    Intent,
+)
 
 
 class _WebSocketStub:
@@ -127,6 +132,43 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
         self.assertEqual(
             service._wire_tool_name("HassLightSet"), "HassLightSet"
         )
+
+    def test_tool_policy_mentions_only_registered_wire_names(self):
+        service = object.__new__(QwenRealtimeLLMService)
+        service._expected_tool_names = {"intent__HassTurnOff"}
+        service._wire_tool_names_by_canonical = {
+            "HassTurnOff": "intent__HassTurnOff"
+        }
+
+        policy = service._build_tool_execution_policy()
+
+        self.assertIn("intent__HassTurnOff", policy)
+        self.assertNotIn("GetLiveContext", policy)
+        self.assertNotIn("HassClimateSetTemperature", policy)
+
+    def test_deterministic_router_cannot_bypass_session_allowlist(self):
+        async def scenario():
+            service = object.__new__(QwenRealtimeLLMService)
+            entity = EntityInfo(name="Apple TV", domain="media_player")
+            service.control_router = SimpleNamespace(resolve=lambda _: Intent(
+                tool="HassTurnOff",
+                arguments={"name": "Apple TV", "domain": ["media_player"]},
+                entity=entity,
+                description="关闭 Apple TV",
+            ))
+            service._wire_tool_names_by_canonical = {
+                "HassTurnOff": "intent__HassTurnOff"
+            }
+            service._expected_tool_names = set()
+            service.has_function = lambda _: True
+            service._execute_ha_tool_locally = AsyncMock()
+
+            self.assertFalse(
+                await service._try_route_control_intent("关闭 Apple TV")
+            )
+            service._execute_ha_tool_locally.assert_not_awaited()
+
+        asyncio.run(scenario())
 
     def test_climate_temperature_tool_has_unambiguous_native_schema(self):
         converted = QwenRealtimeLLMService._to_qwen_tool({
@@ -386,6 +428,74 @@ class QwenToolProtocolSmokeTest(unittest.TestCase):
             self.assertEqual(service._ws_send_checked.await_count, 1)
 
         asyncio.run(scenario())
+
+    def test_stale_speech_during_paced_playback_does_not_interrupt(self):
+        async def scenario():
+            service = object.__new__(QwenRealtimeLLMService)
+            service._tool_debug = False
+            service._provider_generation = 4
+            service._playback_generation = 4
+            service._turn_generation = 9
+            service._speech_started_generation = None
+            service._current_assistant_response = None
+            service._response_create_inflight = False
+            service._interrupt_response = False
+            service._tool_call_seen_for_turn = True
+            service._last_user_transcript = "old"
+            service._det_executed_results = {}
+            service._wake_guard_active = lambda: False
+            service._cancel_conversation_close = lambda: None
+            service._reset_tool_chain_guard = lambda: None
+            service._cancel_transcript_gate = lambda: None
+            service.push_interruption_task_frame_and_wait = AsyncMock()
+            service.push_frame = AsyncMock()
+
+            await service._handle_server_event({
+                "type": "input_audio_buffer.speech_started"
+            })
+
+            service.push_interruption_task_frame_and_wait.assert_not_awaited()
+            service.push_frame.assert_awaited_once()
+
+        asyncio.run(scenario())
+
+    def test_output_drain_releases_playback_generation(self):
+        async def scenario():
+            service = object.__new__(QwenRealtimeLLMService)
+            service._conversation_active = True
+            service._api_session_ready = True
+            service._provider_generation = 4
+            service._playback_generation = 4
+            service._response_done_generation = 4
+            service._current_assistant_response = None
+            service._pending_tool_call_ids = set()
+            service._conversation_close_delay_s = 10.7
+            service.schedule_conversation_close = lambda delay, reason: None
+
+            await service.on_output_drained()
+
+            self.assertIsNone(service._playback_generation)
+
+        asyncio.run(scenario())
+
+    def test_accepted_tool_result_is_not_described_as_failure(self):
+        note = QwenRealtimeLLMService._build_confirmation_note(
+            Intent(
+                "HassFanSetPreset",
+                {"name": "空气净化器"},
+                EntityInfo(name="空气净化器", domain="fan"),
+                "设置睡眠模式",
+            ),
+            json.dumps({
+                "success": True,
+                "status": "accepted",
+                "verified": False,
+                "result": "指令已发送，状态尚未同步",
+            }, ensure_ascii=False),
+        )
+
+        self.assertIn("尚未验证最终状态", note)
+        self.assertIn("不得声称失败", note)
 
     def test_tool_result_send_failure_surfaces_connection_error(self):
         async def scenario():

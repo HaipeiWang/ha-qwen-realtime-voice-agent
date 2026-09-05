@@ -42,19 +42,6 @@ from app.tool_names import canonical_tool_name, canonical_wire_map
 logger = logging.getLogger(__name__)
 
 
-TOOL_EXECUTION_POLICY = """
-你是 Home Assistant 的语音控制助手。所有可用 function 工具都是真实的
-Home Assistant 操作或查询能力。
-
-严格规则：
-1. 用户要求打开、关闭、调节、查询或控制任何家庭设备时，必须先调用最合适的
-   function 工具；绝不能只用自然语言声称“正在执行”或“已经完成”。
-2. 仅在收到 function 工具的结果后，才能向用户确认执行结果。
-3. 若设备名称不够明确，先使用 GetLiveContext 查询可用实体，或向用户澄清；
-   不得虚构操作成功。
-4. 普通闲聊无需调用工具。工具调用优先于任何语音回复。
-""".strip()
-
 TOOL_UNAVAILABLE_POLICY = """
 当前 Home Assistant 工具没有成功注册。对于任何设备控制或状态查询，必须明确告知
 用户“设备控制服务暂时不可用”，不得声称正在执行或已经执行。
@@ -80,6 +67,14 @@ CORE_TOOL_DESCRIPTIONS = {
     "HassClimateSetTemperature": (
         "设置 Home Assistant 空调的目标温度。用户说把空调设为多少度、升高或降低到"
         "某个温度时，必须使用此工具；不得使用 HassSelectOption 代替。"
+    ),
+    "HassFanSetSpeed": (
+        "设置 Home Assistant 风扇或空气净化器的风速百分比。用户要求调节风量时，"
+        "必须调用此工具后再确认。"
+    ),
+    "HassStopMoving": (
+        "停止 Home Assistant 中正在移动的窗帘、晾衣架或其他 cover 设备。用户要求"
+        "停止移动时，必须调用此工具后再确认。"
     ),
 }
 
@@ -220,6 +215,10 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         # the current provider generation has crossed the paced-output boundary.
         # Synthetic/cancellation end frames must never masquerade as that edge.
         self._response_done_generation = None
+        # Provider response.done can arrive seconds before paced playback has
+        # reached Voice PE. Keep this generation latched until the pacer drains
+        # so stale mic/VAD events cannot cancel already-generated speech.
+        self._playback_generation = None
         self._pending_input_audio = deque()
         self._pending_input_audio_bytes = 0
         self._pending_input_audio_limit = 16000 * 2 * 5  # five seconds, mono PCM16
@@ -398,6 +397,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         self._qwen_audio_bytes = 0
         self._response_boundary_open = False
         self._response_done_generation = None
+        self._playback_generation = None
         self._response_create_inflight = False
         self._response_cancel_pending = False
         self._response_after_cancel_pending = False
@@ -476,6 +476,8 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                 self._provider_generation,
             )
             return
+        if self._playback_generation == self._provider_generation:
+            self._playback_generation = None
         logger.info(
             "Qwen output drained; generation=%u closes after %.1fs follow-up window",
             self._provider_generation, self._conversation_close_delay_s,
@@ -783,6 +785,25 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             lines.append(f"- {entity.name} [{entity.domain}]{area}")
         return "\n".join(lines)
 
+    def _build_tool_execution_policy(self) -> str:
+        """Describe only tools that are actually registered in this session."""
+        if not self._expected_tool_names:
+            return TOOL_UNAVAILABLE_POLICY
+        tool_names = "、".join(sorted(self._expected_tool_names))
+        live_context = self._wire_tool_names_by_canonical.get("GetLiveContext")
+        ambiguity_rule = (
+            f"设备名称不明确或需要查询状态时，先调用 {live_context}；不得猜测。"
+            if live_context
+            else "设备名称不明确时必须向用户澄清，不得猜测或虚构操作成功。"
+        )
+        return "\n".join((
+            "你是 Home Assistant 的语音控制助手。",
+            f"本会话实际注册的工具只有：{tool_names}。不得调用或提及未注册工具。",
+            "用户要求控制家庭设备时，必须先调用其中最合适的工具；绝不能只用自然语言声称正在执行或已经完成。",
+            "仅在收到工具结果后才能确认执行结果；普通闲聊无需调用工具。",
+            ambiguity_rule,
+        ))
+
     async def send_client_event(self, event):  # pragma: no cover - defensive bridge
         """Prevent inherited OpenAI event classes from reaching DashScope."""
         payload = self._as_dict(event)
@@ -846,14 +867,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         self._wire_tool_names_by_canonical = canonical_wire_map(
             self._expected_tool_names
         )
-        execution_policy = TOOL_EXECUTION_POLICY
-        live_context_wire_name = self._wire_tool_names_by_canonical.get(
-            "GetLiveContext", "GetLiveContext"
-        )
-        if live_context_wire_name != "GetLiveContext":
-            execution_policy = execution_policy.replace(
-                "GetLiveContext", live_context_wire_name
-            )
+        execution_policy = self._build_tool_execution_policy()
         if not qwen_tools:
             logger.error(
                 "QWEN TOOL REGISTRATION FAILED: zero valid tools before session.update; "
@@ -869,7 +883,6 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                 getattr(settings, "instructions", "") or "",
                 self._build_entity_catalog_hint(),
                 execution_policy,
-                TOOL_UNAVAILABLE_POLICY if not qwen_tools else "",
             ) if part
         )
         effective_instructions = self._session_instructions
@@ -1163,9 +1176,13 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
         if intent is None:
             return False
         wire_tool = self._wire_tool_name(intent.tool)
-        if not self.has_function(wire_tool):
+        if (
+            wire_tool not in self._expected_tool_names
+            or not self.has_function(wire_tool)
+        ):
             logger.warning(
-                "Deterministic intent tool %s (wire=%s) is not registered; deferring to model",
+                "Deterministic intent tool %s (wire=%s) is unavailable in this session; "
+                "deferring to model",
                 intent.tool,
                 wire_tool,
             )
@@ -1239,6 +1256,13 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             data = None
 
         if isinstance(data, dict):
+            if data.get("status") == "accepted" and not data.get("verified"):
+                detail = str(data.get("result") or "Home Assistant 已接受指令")
+                return (
+                    f"[系统] 工具 {intent.tool} 已接受操作：{intent.description}，"
+                    f"但尚未验证最终状态。详情：{detail}。请只说明指令已发送且状态"
+                    "尚在同步，不得声称失败或已经确认完成。"
+                )
             # Home Assistant MCP control actions return
             # {"response_type":"action_done","data":{"success":[...],"failed":[...]}}.
             inner = data.get("data")
@@ -1722,6 +1746,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
             # may cancel a playing reply in that mode.
             reply_active = bool(
                 self._current_assistant_response or self._response_create_inflight
+                or self._playback_generation == self._provider_generation
             )
             if reply_active and not self._interrupt_response:
                 logger.info(
@@ -1790,6 +1815,7 @@ class QwenRealtimeLLMService(OpenAIRealtimeLLMService):
                 return
             audio = base64.b64decode(event.get("delta", ""), validate=True)
             if audio:
+                self._playback_generation = self._provider_generation
                 if not getattr(self, "_qwen_tts_active", False):
                     self._qwen_tts_active = True
                     await self.push_frame(TTSStartedFrame())

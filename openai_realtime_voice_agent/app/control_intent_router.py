@@ -28,6 +28,14 @@ from typing import Optional
 from urllib import request
 
 from app.tool_names import canonical_tool_name
+from app.tool_policy import (
+    CLIMATE_SET_TEMPERATURE_TOOL as POLICY_CLIMATE_SET_TOOL,
+    COVER_STOP_TOOL as POLICY_COVER_STOP_TOOL,
+    FAN_SET_SPEED_TOOL as POLICY_FAN_SET_TOOL,
+    LIGHT_SET_TOOL as POLICY_LIGHT_SET_TOOL,
+    TURN_OFF_TOOL as POLICY_TURN_OFF_TOOL,
+    TURN_ON_TOOL as POLICY_TURN_ON_TOOL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -459,12 +467,12 @@ class ControlIntentRouter:
     """Rule-based detector that turns a transcript into a forced tool call."""
 
     # Ordered by priority.  Each tuple: (tool, verb keywords).
-    TURN_ON_TOOL = "HassTurnOn"
-    TURN_OFF_TOOL = "HassTurnOff"
-    LIGHT_SET_TOOL = "HassLightSet"
-    CLIMATE_SET_TOOL = "HassClimateSetTemperature"
-    FAN_SET_TOOL = "HassFanSetSpeed"
-    COVER_STOP_TOOL = "HassStopMoving"
+    TURN_ON_TOOL = POLICY_TURN_ON_TOOL
+    TURN_OFF_TOOL = POLICY_TURN_OFF_TOOL
+    LIGHT_SET_TOOL = POLICY_LIGHT_SET_TOOL
+    CLIMATE_SET_TOOL = POLICY_CLIMATE_SET_TOOL
+    FAN_SET_TOOL = POLICY_FAN_SET_TOOL
+    COVER_STOP_TOOL = POLICY_COVER_STOP_TOOL
 
     # Sub-function switches: spoken word -> token found in the switch's
     # friendly name.  Used to route "打开净化器童锁" to the child-lock switch

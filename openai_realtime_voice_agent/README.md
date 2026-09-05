@@ -16,14 +16,14 @@
 The companion firmware is published at
 [HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen).
 
-## New in 0.10.0-beta.4
+## New in 0.10.0-beta.5
 
-- Supports legacy MCP tool names and Home Assistant Core 2026.9 namespaced tool
-  names without changing existing Add-on allow-list settings.
-- Uses `homeassistant__GetLiveContext` on new Core versions with an automatic
-  `GetLiveContext` fallback for older systems.
-- Preserves exact-name entity selection and removes a conflicting area instead
-  of allowing namespace compatibility to bypass the existing safety harness.
+- Repairs allow-lists saved with spaces, commas or newlines and resolves legacy
+  names to the wire names returned by current Home Assistant Core.
+- Uses one validated tool policy for discovery, deterministic routing and Qwen
+  instructions, restoring power, temperature, fan-speed and stop controls.
+- Verifies asynchronous device state before speaking a result and keeps reply
+  audio protected until paced playback has fully drained.
 
 ## Before starting
 

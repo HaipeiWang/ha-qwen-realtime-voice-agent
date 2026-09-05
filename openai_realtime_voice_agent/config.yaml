@@ -1,5 +1,5 @@
 name: Qwen Realtime Voice Agent
-version: "0.10.0-beta.4"
+version: "0.10.0-beta.5"
 slug: openai_realtime_voice_agent
 description: Native Qwen Realtime speech-to-speech voice agent for Home Assistant Voice PE, with automatic Home Assistant tools.
 url: https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
@@ -112,7 +112,7 @@ options:
   longlived_token: ""
   # Keep the Qwen control surface deterministic by default. This limits tool
   # kinds, not Home Assistant entities; all entity names remain available.
-  mcp_tool_allowlist: "GetLiveContext,HassTurnOn,HassTurnOff,HassLightSet,HassClimateSetTemperature"
+  mcp_tool_allowlist: "GetLiveContext,HassTurnOn,HassTurnOff,HassLightSet,HassClimateSetTemperature,HassFanSetSpeed,HassStopMoving"
   # Auto-discover device capabilities and expose extra tools (空调模式/风速/摆风、
   # 净化器预设、select 选项) to Qwen. On by default. The comma list picks which
   # capability types to enable (climate_mode,climate_fan,climate_swing,

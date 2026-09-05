@@ -1,6 +1,14 @@
 """Smoke checks for capability generation and the Assist exposure boundary."""
 
+import asyncio
+import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_PROJECT_ROOT))
 
 from app.ha_tool_builder import (
     CAPABILITY_TEMPLATES,
@@ -92,6 +100,46 @@ def main() -> None:
             "unused",
             allowed_names=set(),
         ) == []
+
+    fan_states = [{
+        "entity_id": "fan.purifier",
+        "attributes": {
+            "friendly_name": "空气净化器",
+            "preset_modes": ["auto", "sleep"],
+        },
+    }]
+    with patch("app.ha_tool_builder._fetch_states", return_value=fan_states):
+        fan_tool = build_generated_tools(
+            "http://home-assistant", "unused", allowed_names={"空气净化器"}
+        )[0]
+
+    async def run_handler(verification):
+        results = []
+
+        async def capture(result, *, properties=None):
+            results.append(json.loads(result))
+
+        params = SimpleNamespace(
+            arguments={"name": "空气净化器", "preset_mode": "sleep"},
+            result_callback=capture,
+        )
+        with patch("app.ha_tool_builder._call_ha_service", return_value=[]), patch(
+            "app.ha_tool_builder._wait_for_capability_value",
+            return_value=verification,
+        ):
+            await fan_tool.handler(params)
+        return results[0]
+
+    verified = asyncio.run(run_handler((True, "sleep")))
+    assert verified["success"] is True
+    assert verified["status"] == "verified"
+    assert verified["verified"] is True
+
+    accepted = asyncio.run(run_handler((False, "auto")))
+    assert accepted["success"] is True
+    assert accepted["status"] == "accepted"
+    assert accepted["verified"] is False
+    assert "不能声称失败" in accepted["result"]
 
     print("ha_tool_builder smoke checks passed")
 

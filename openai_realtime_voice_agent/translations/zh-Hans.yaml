@@ -70,7 +70,7 @@ configuration:
     description: "内置 MCP 保持留空；仅外部 MCP 服务明确要求时填写。"
   mcp_tool_allowlist:
     name: "🏠 Home Assistant · 工具白名单"
-    description: "暴露给千问的工具名称，逗号分隔。默认包含设备查询、开关、灯光设置和空调目标温度。"
+    description: "暴露给千问的工具名称，支持逗号或空格分隔，并自动兼容新版 Core 命名空间。默认包含查询、开关、灯光、空调温度、风扇调速和停止移动。"
   auto_tool_generation:
     name: "🏠 Home Assistant · 自动生成设备工具"
     description: "启动时根据已暴露给 Assist 的实体能力生成额外工具，例如空调模式、风速、摆风、净化器预设和 select 选项。"

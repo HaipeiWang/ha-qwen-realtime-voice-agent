@@ -2,6 +2,7 @@
 import os
 import sys
 import asyncio
+import json
 import logging
 from typing import Optional
 import dotenv
@@ -24,7 +25,8 @@ from app.control_intent_router import (
     build_catalog_from_ha,
 )
 from app.ha_tool_builder import GeneratedTool, build_generated_tools
-from app.tool_names import canonical_tool_name, tool_allowed
+from app.tool_names import canonical_tool_name
+from app.tool_policy import parse_tool_allowlist, resolve_tool_allowlist
 
 # Configure logging
 logging.basicConfig(
@@ -60,34 +62,6 @@ def _resolve_choice(env_var: str, custom_env_var: str, default: str) -> str:
     return choice or default
 
 dotenv.load_dotenv()
-
-
-LEGACY_DEFAULT_MCP_TOOL_ALLOWLIST = {
-    "GetLiveContext",
-    "HassTurnOn",
-    "HassTurnOff",
-    "HassLightSet",
-}
-
-
-def _parse_mcp_tool_allowlist(raw_value: str) -> list[str]:
-    """Parse the allow-list and migrate the pre-temperature default.
-
-    Home Assistant preserves saved Add-on options across upgrades. Merely
-    changing config.yaml would therefore leave existing installations without
-    HassClimateSetTemperature forever. Only the exact historic four-tool
-    default is migrated; a genuinely custom allow-list remains authoritative.
-    """
-    tools = [value.strip() for value in (raw_value or "").split(",") if value.strip()]
-    if (
-        len(tools) == len(LEGACY_DEFAULT_MCP_TOOL_ALLOWLIST)
-        and set(tools) == LEGACY_DEFAULT_MCP_TOOL_ALLOWLIST
-    ):
-        tools.append("HassClimateSetTemperature")
-        logger.info(
-            "Migrated legacy MCP tool allow-list: added HassClimateSetTemperature"
-        )
-    return tools
 
 
 class SafeRealtimeLLMService(QwenRealtimeLLMService):
@@ -224,10 +198,25 @@ class SafeRealtimeLLMService(QwenRealtimeLLMService):
                     )
                     return
                 result_sent = True
-                success = result.get("success", True) if isinstance(result, dict) else True
+                payload = result
+                if isinstance(result, str):
+                    try:
+                        payload = json.loads(result)
+                    except (json.JSONDecodeError, TypeError):
+                        payload = None
+                success = (
+                    payload.get("success", True)
+                    if isinstance(payload, dict)
+                    else True
+                )
+                status = (
+                    payload.get("status", "completed")
+                    if isinstance(payload, dict)
+                    else "completed"
+                )
                 logger.info(
-                    "MCP execution completed: tool=%s call_id=%s success=%s",
-                    params.function_name, params.tool_call_id, success,
+                    "MCP execution completed: tool=%s call_id=%s success=%s status=%s",
+                    params.function_name, params.tool_call_id, success, status,
                 )
                 await original_result_callback(result, properties=properties)
 
@@ -426,8 +415,9 @@ class Application:
             noise_reduction = ""
 
         # Optional allow-list to trim the (large) ha-mcp tool set exposed to the
-        # model. Comma-separated tool names; empty means expose all.
-        mcp_tool_allowlist = _parse_mcp_tool_allowlist(
+        # model. UI and legacy records may use commas, whitespace or newlines;
+        # empty means expose all.
+        mcp_tool_allowlist = parse_tool_allowlist(
             os.environ.get("MCP_TOOL_ALLOWLIST", "")
         )
         # Auto-generated capability tools (climate mode/fan/swing, fan preset,
@@ -719,14 +709,15 @@ class Application:
                     logger.info("🔧 Fetching MCP tool definitions...")
                     mcp_tools_schema = await self.mcp_client.get_tools_schema()
                     
-                    # Convert MCP tool schemas to OpenAI format, applying the
-                    # optional allow-list so the realtime session isn't flooded
-                    # with ha-mcp's 80+ tools.
-                    exposed = 0
+                    available_names = [
+                        schema.name for schema in mcp_tools_schema.standard_tools
+                    ]
+                    selected_names, missing_names = resolve_tool_allowlist(
+                        available_names, self.mcp_tool_allowlist
+                    )
+                    selected_set = set(selected_names)
                     for function_schema in mcp_tools_schema.standard_tools:
-                        if self.mcp_tool_allowlist and not tool_allowed(
-                            function_schema.name, self.mcp_tool_allowlist
-                        ):
+                        if self.mcp_tool_allowlist and function_schema.name not in selected_set:
                             continue
                         openai_tool = {
                             "type": "function",
@@ -739,10 +730,15 @@ class Application:
                             }
                         }
                         all_tools.append(openai_tool)
-                        exposed += 1
 
                     if self.mcp_tool_allowlist:
-                        logger.info(f"✅ Fetched {len(mcp_tools_schema.standard_tools)} MCP tools, exposing {exposed} per allow-list")
+                        log = logger.error if missing_names else logger.info
+                        log(
+                            "MCP tool reconciliation: discovered=%d configured=%d "
+                            "matched=%d missing=%s",
+                            len(available_names), len(self.mcp_tool_allowlist),
+                            len(selected_names), missing_names,
+                        )
                     else:
                         logger.info(f"✅ Fetched {len(mcp_tools_schema.standard_tools)} MCP tools")
                 except Exception as e:

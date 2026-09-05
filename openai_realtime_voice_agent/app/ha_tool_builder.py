@@ -18,8 +18,10 @@ generated; dangerous services (system/script/homeassistant/...) are excluded.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 from urllib import request
@@ -154,6 +156,8 @@ UNSAFE_DOMAINS = {
 }
 
 MAX_GENERATED_TOOLS = 30
+STATE_VERIFY_TIMEOUT_S = 3.0
+STATE_VERIFY_INTERVAL_S = 0.2
 
 
 @dataclass
@@ -196,6 +200,52 @@ def _call_ha_service(
     with request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8") or "[]"
         return json.loads(raw)
+
+
+def _fetch_entity_state(
+    base_url: str, token: str, entity_id: str, timeout: float = 5.0
+) -> dict:
+    req = request.Request(
+        f"{base_url}/api/states/{entity_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _capability_value(state: dict, cap: dict):
+    """Read the current value controlled by one capability template."""
+    param = cap["param"]
+    if param in {"hvac_mode", "option"}:
+        return state.get("state")
+    return (state.get("attributes") or {}).get(param)
+
+
+def _wait_for_capability_value(
+    base_url: str,
+    token: str,
+    entity_id: str,
+    cap: dict,
+    expected,
+    *,
+    timeout: float = STATE_VERIFY_TIMEOUT_S,
+) -> tuple[bool, object]:
+    """Poll HA state after an asynchronous service call."""
+    deadline = time.monotonic() + max(0.0, timeout)
+    observed = None
+    while True:
+        try:
+            observed = _capability_value(
+                _fetch_entity_state(base_url, token, entity_id), cap
+            )
+            if str(observed) == str(expected):
+                return True, observed
+        except Exception as exc:  # state may be briefly unavailable after service call
+            logger.debug("Capability state verification pending: %r", exc)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False, observed
+        time.sleep(min(STATE_VERIFY_INTERVAL_S, remaining))
 
 
 def build_generated_tools(
@@ -403,31 +453,46 @@ def _make_handler(base_url: str, token: str, cap: dict, entities: list[dict]) ->
             )
             return
         try:
-            changed = _call_ha_service(
-                base_url, token, cap["service"], entity["entity_id"], {cap["param"]: value}
+            # HA integrations often acknowledge a service before their entity
+            # state is updated. REST may therefore return [] even though the
+            # physical action succeeds; verify the target value instead of
+            # treating the response body as an execution verdict.
+            await asyncio.to_thread(
+                _call_ha_service,
+                base_url,
+                token,
+                cap["service"],
+                entity["entity_id"],
+                {cap["param"]: value},
             )
-            # HA returns [] when the service call did not actually change any
-            # entity (e.g. select_option on a fan, or a wrong entity_id).  Treat
-            # that as failure so the model cannot report a false success.
-            if not changed:
-                await params.result_callback(
-                    json.dumps(
-                        {
-                            "success": False,
-                            "tool": cap["tool"],
-                            "error": (
-                                f"HA 服务执行后没有实体状态变化（可能实体名不正确，"
-                                f"或 {entity['name']} 不支持此操作）"
-                            ),
-                        },
-                        ensure_ascii=False,
-                    )
-                )
+            verified, observed = await asyncio.to_thread(
+                _wait_for_capability_value,
+                base_url,
+                token,
+                entity["entity_id"],
+                cap,
+                value,
+            )
+            if not verified:
+                await params.result_callback(json.dumps({
+                    "success": True,
+                    "status": "accepted",
+                    "verified": False,
+                    "tool": cap["tool"],
+                    "result": (
+                        f"Home Assistant 已接受将 {entity['name']} 的{cap['param_desc']}"
+                        f"设为 {value} 的指令，但状态尚未同步"
+                        + (f"（当前值：{observed}）" if observed is not None else "")
+                        + "；只能确认指令已发送，不能声称失败或已确认完成"
+                    ),
+                }, ensure_ascii=False))
                 return
             await params.result_callback(
                 json.dumps(
                     {
                         "success": True,
+                        "status": "verified",
+                        "verified": True,
                         "tool": cap["tool"],
                         "result": f"已将 {entity['name']} 的{cap['param_desc']}设为 {value}",
                     },
