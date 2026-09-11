@@ -2,6 +2,26 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.11.0-beta.1
+
+### Added
+
+- Provider-neutral realtime Core and adapter contract for canonical events,
+  PCM audio, tools, results, turns, lifecycle and cancellation boundaries.
+- Dedicated Qwen adapter plus a fake provider used to test the shared harness.
+  Qwen is the only provider included in this preview; GLM remains planned.
+- Shared Home Assistant tool registry, execution ledger, parameter arbitration,
+  exact-name routing, clarification state and result-constrained confirmations.
+- Actual-time and Assist-exposed weather fact tools.
+
+### Fixed
+
+- Pace 24 kHz reply audio from monotonic deadlines so processing overhead does
+  not accumulate on every packet, and rebase after a blocked send without a
+  damaging catch-up burst.
+- Reject incomplete control writes and unsupported scheduled-action promises;
+  preserve tool results by execution identity and verify state after writes.
+
 ## 0.10.0-beta.5
 
 ### Fixed

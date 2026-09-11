@@ -1,12 +1,18 @@
 <p align="center">
-  <img src="openai_realtime_voice_agent/icon.png" alt="Qwen Realtime Voice Agent for Home Assistant Voice PE" width="160"/>
+  <img src="openai_realtime_voice_agent/icon.png" alt="Natural Home Assistant Realtime Harness" width="160"/>
 </p>
 
 <p align="center">
   <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-# Qwen Realtime Voice Agent for Home Assistant Voice PE
+# Natural Home Assistant Realtime Harness
+
+This release turns the former Qwen-specific application into a provider-neutral
+realtime harness. **Qwen is the provider shipped and tested in this preview.**
+The shared runtime no longer consumes Qwen protocol messages or session state;
+additional providers, including GLM, can implement the same adapter contract in a
+later release without duplicating Home Assistant control, turn, or audio logic.
 
 ## What it can do
 
@@ -28,7 +34,40 @@
 - Pace and buffer streamed audio, recover provider connections, and optionally
   record diagnostic audio for troubleshooting.
 
-## What's new in 0.10.0-beta.5
+## What's new in 0.11.0-beta.1
+
+- Introduces a provider-neutral Core with canonical realtime events, audio chunks,
+  tool definitions, results, turn identity, lifecycle and cancellation boundaries.
+- Moves Qwen WebSocket events, session configuration and model/voice rules into a
+  dedicated Qwen adapter. A fake provider validates the shared contract without a
+  cloud connection. GLM is planned but is not included in this release.
+- Centralizes Home Assistant tool registration, execution records, parameter
+  arbitration, exact-name routing and result-based spoken confirmations.
+- Adds actual-time and Assist-exposed weather fact tools, bounded tool execution,
+  clarification carry-over, and rejection of unsupported future-action promises.
+- Adapts 24 kHz streamed reply audio to Voice PE with monotonic packet deadlines.
+  Normal processing overhead no longer slows every packet, while delayed writes
+  rebase the clock instead of producing a catch-up burst.
+
+## Provider boundary
+
+```text
+Voice PE 16 kHz PCM
+        │
+        ▼
+shared realtime Core ── Home Assistant tools / router / confirmations
+        │
+        ├── Qwen adapter (available and tested)
+        └── GLM adapter  (interface reserved; implementation pending)
+        │
+        ▼
+paced 24 kHz PCM → Voice PE playback buffer
+```
+
+The Add-on configuration remains Qwen-native in this preview because Qwen is the
+only selectable provider. Provider credentials and protocol objects are confined
+to the adapter and composition layer; the shared Core and Home Assistant tool layer
+do not import Qwen protocol state.
 
 - Repairs allow-lists saved with spaces, commas or newlines and maps legacy tool
   names to the namespaced names returned by current Home Assistant Core.
@@ -49,8 +88,8 @@ capability tools built from entities exposed to Assist.
 ```text
 Voice PE custom firmware               Home Assistant OS Add-on
 ┌────────────────────────┐  PCM / WS  ┌─────────────────────────────┐
-│ wake word + microphone │ ─────────▶ │ Qwen Omni Realtime bridge  │
-│ speaker + LED state    │ ◀───────── │ paced audio + state machine│
+│ wake word + microphone │ ─────────▶ │ provider-neutral Core       │
+│ speaker + LED state    │ ◀───────── │ Qwen adapter + paced audio  │
 └────────────────────────┘            └──────────────┬──────────────┘
                                                     │ MCP + generated tools
                                                     ▼
@@ -72,16 +111,12 @@ address, recording, or user-specific entity data is included in this repository.
 
 The Add-on Configuration page exposes these native WebSocket models:
 
-| Model | Intended test | Home Assistant tools | Web search |
-| --- | --- | --- | --- |
-| `qwen-audio-3.0-realtime-flash` | Low-cost speech assistant (default) | Yes | No |
-| `qwen-audio-3.0-realtime-plus` | Higher-quality speech assistant | Yes | No |
-| `qwen3.5-omni-flash-realtime` | Fast multimodal voice assistant | Yes | Yes* |
-| `qwen3.5-omni-plus-realtime` | Highest-quality multimodal assistant | Yes | Yes* |
-
-\* Qwen does not allow web search and function tools in the same session. Keep
-Home Assistant tools enabled for device control; use a separate search-only
-configuration when testing Omni web search.
+| Model | Intended test | Home Assistant tools |
+| --- | --- | --- |
+| `qwen-audio-3.0-realtime-flash` | Low-cost speech assistant (default) | Yes |
+| `qwen-audio-3.0-realtime-plus` | Higher-quality speech assistant | Yes |
+| `qwen3.5-omni-flash-realtime` | Fast multimodal voice assistant | Yes |
+| `qwen3.5-omni-plus-realtime` | Highest-quality multimodal assistant | Yes |
 
 Voice choices are model-family safe: Qwen-Audio uses its dedicated `longan*`
 selector (or a Qwen-Audio cloned voice ID), while Qwen3.5 Omni uses a separate
@@ -98,7 +133,7 @@ and falls back with an explicit error if a voice does not match the model.
    https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
    ```
 
-3. Install **Qwen Realtime Voice Agent**. The repository intentionally has
+3. Install **Natural Realtime Harness (Qwen Preview)**. The repository intentionally has
    no fixed container image, so HAOS builds the Add-on for its own architecture
    from the included Dockerfile. The first build can take several minutes.
 4. Open the Add-on **Configuration** page and enter your own:

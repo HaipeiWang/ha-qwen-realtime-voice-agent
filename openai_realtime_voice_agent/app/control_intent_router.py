@@ -91,6 +91,7 @@ class EntityInfo:
     device_class: str = ""
     entity_id: str = ""
     state: str = ""
+    aliases: tuple[str, ...] = ()
 
     def keywords(self) -> list[str]:
         """Tokenise a friendly name into matchable keywords."""
@@ -511,6 +512,10 @@ class ControlIntentRouter:
             return None
         norm = _to_simplified(text)
 
+        from app.core.arbitration import explicit_light_values, is_state_query
+        if is_state_query(text):
+            return None
+
         # 0) Dynamic forced-routing rules from auto-generated capability tools
         # (空调模式/风速/摆风、净化器预设).  The rule's domain must be hinted in
         # the utterance AND one of its value keywords must appear, so a bare
@@ -535,14 +540,18 @@ class ControlIntentRouter:
             self._has_any(norm, ("亮度", "调亮", "调暗", "亮一点", "暗一点", "最暗", "最亮"))
             or (self._has_any(norm, ("调", "调到", "百分之")) and _parse_control_number(text) is not None)
         ):
-            brightness = _parse_control_number(text)
+            brightness = explicit_light_values(text).get("brightness")
             if brightness is None:
                 if "最暗" in norm:
                     brightness = 1
                 elif "最亮" in norm:
                     brightness = 100
+                elif self._has_any(norm, ("调亮", "亮一点", "调暗", "暗一点")):
+                    # Placeholder is replaced with a fresh-state calculation by
+                    # the shared arbiter before dispatch, never a default value.
+                    brightness = 0
                 else:
-                    brightness = 80 if self._has_any(norm, ("调亮", "亮一点")) else 30
+                    return None
             return Intent(
                 tool=self.LIGHT_SET_TOOL,
                 arguments={"name": light_entity.name, "domain": ["light"], "brightness": brightness},

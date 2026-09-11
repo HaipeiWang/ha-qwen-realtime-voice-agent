@@ -1,12 +1,17 @@
 <p align="center">
-  <img src="openai_realtime_voice_agent/icon.png" alt="适用于 Home Assistant Voice PE 的通义千问 Omni Realtime 语音助手" width="160"/>
+  <img src="openai_realtime_voice_agent/icon.png" alt="Natural Home Assistant Realtime Harness" width="160"/>
 </p>
 
 <p align="center">
   <a href="README.md">English</a> · <strong>简体中文</strong>
 </p>
 
-# 适用于 Home Assistant Voice PE 的通义千问 Realtime 语音助手
+# Natural Home Assistant Realtime Harness
+
+本版本已将原先面向千问的应用重构为 Provider 中立的 Realtime Harness。
+**当前预览版只提供并实测 Qwen Adapter。** 共享运行层不再读取千问协议事件或会话
+状态；后续可让 GLM 等 Provider 实现同一 Adapter 契约，而无需复制 Home Assistant
+控制、Turn 管理和音频逻辑。
 
 ## 它能做什么
 
@@ -22,7 +27,37 @@
   通过同一 Bluetooth Proxy 接入、却被归入错误房间的客厅灯仍可被正确选中。
 - 对流式音频进行匀速发送和缓冲，支持连接恢复及可选诊断录音。
 
-## 0.10.0-beta.5 更新内容
+## 0.11.0-beta.1 更新内容
+
+- 新增 Provider 中立的共享 Core，统一 Realtime 事件、音频、工具定义与结果、Turn
+  身份、生命周期和取消边界。
+- 将千问 WebSocket 协议、会话配置、模型和音色规则收进独立 Qwen Adapter；使用
+  Fake Provider 验证共享契约。GLM 只预留接口，本版本尚未实现。
+- 统一 Home Assistant 工具注册、执行记录、参数仲裁、精确名称优先和依据实际结果
+  生成控制回执的逻辑。
+- 增加真实时间与 Assist 已公开天气数据工具、工具调用上限、澄清承接，以及对未实现
+  定时操作承诺的拦截。
+- 使用单调时钟向 Voice PE 匀速发送 24 kHz 回复音频；正常处理耗时不再逐包累积，
+  发送阻塞后重建节拍而不集中追发。
+
+## Provider 边界
+
+```text
+Voice PE 16 kHz PCM
+        │
+        ▼
+共享 Realtime Core ── Home Assistant 工具 / Router / 控制回执
+        │
+        ├── Qwen Adapter（已提供并实测）
+        └── GLM Adapter （已预留接口，尚未实现）
+        │
+        ▼
+匀速 24 kHz PCM → Voice PE 播放缓冲
+```
+
+当前 Add-on 配置页仍只显示千问字段，因为预览版唯一可选 Provider 是 Qwen。Provider
+凭据与协议对象只存在于 Adapter 和组装入口；共享 Core 与 Home Assistant 工具层不
+依赖千问协议状态。
 
 - 修复以空格、逗号或换行保存的工具白名单，并把旧工具名自动映射到当前 Home
   Assistant Core 的命名空间工具名。
@@ -41,8 +76,8 @@ Add-on 将配套 Voice PE 固件直接连接到阿里云百炼 Qwen Realtime。�
 ```text
 Voice PE 定制固件                       Home Assistant OS Add-on
 ┌────────────────────────┐  PCM / WS  ┌─────────────────────────────┐
-│ 唤醒词 + 麦克风         │ ─────────▶ │ Qwen Omni Realtime 桥接服务 │
-│ 扬声器 + LED 状态       │ ◀───────── │ 匀速音频 + 状态机           │
+│ 唤醒词 + 麦克风         │ ─────────▶ │ Provider 中立共享 Core       │
+│ 扬声器 + LED 状态       │ ◀───────── │ Qwen Adapter + 匀速音频      │
 └────────────────────────┘            └──────────────┬──────────────┘
                                                     │ MCP + 自动生成工具
                                                     ▼
@@ -64,15 +99,12 @@ Voice PE 定制固件                       Home Assistant OS Add-on
 
 Add-on 的配置页面提供以下原生 WebSocket 模型：
 
-| 模型 | 推荐测试用途 | Home Assistant 工具 | 联网搜索 |
-| --- | --- | --- | --- |
-| `qwen-audio-3.0-realtime-flash` | 低成本语音助手（默认） | 支持 | 不支持 |
-| `qwen-audio-3.0-realtime-plus` | 更高质量语音助手 | 支持 | 不支持 |
-| `qwen3.5-omni-flash-realtime` | 快速全模态语音助手 | 支持 | 支持* |
-| `qwen3.5-omni-plus-realtime` | 最高质量全模态助手 | 支持 | 支持* |
-
-\* 千问不能在同一会话同时启用联网搜索和 Function Calling。控制设备时请保持
-Home Assistant 工具开启；测试 Omni 联网搜索时请使用独立的“仅搜索”配置。
+| 模型 | 推荐测试用途 | Home Assistant 工具 |
+| --- | --- | --- |
+| `qwen-audio-3.0-realtime-flash` | 低成本语音助手（默认） | 支持 |
+| `qwen-audio-3.0-realtime-plus` | 更高质量语音助手 | 支持 |
+| `qwen3.5-omni-flash-realtime` | 快速全模态语音助手 | 支持 |
+| `qwen3.5-omni-plus-realtime` | 最高质量全模态助手 | 支持 |
 
 音色按模型族分开选择：Qwen-Audio 使用独立的 `longan*` 下拉菜单（或声音复刻
 voice_id），Qwen3.5 Omni 使用只包含 Omni 音色的下拉菜单。后端还会校验旧配置
@@ -87,7 +119,7 @@ voice_id），Qwen3.5 Omni 使用只包含 Omni 音色的下拉菜单。后端�
    https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
    ```
 
-3. 安装 **Qwen Realtime Voice Agent**。仓库有意不绑定固定容器镜像，HAOS
+3. 安装 **Natural Realtime Harness (Qwen Preview)**。仓库有意不绑定固定容器镜像，HAOS
    会使用随附的 Dockerfile 为当前主机架构构建 Add-on，首次构建可能需要几分钟。
 4. 打开 Add-on 的 **配置** 页面，填写你自己的：
 

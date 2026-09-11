@@ -17,7 +17,7 @@ configuration:
     description: "Optional ISO language code, for example zh, en or nl. Empty lets Qwen detect the language."
   qwen_model:
     name: "🗣️ Qwen · Realtime model"
-    description: "Choose Qwen-Audio or Qwen Omni Realtime. Audio Flash is the low-cost voice-assistant option; Omni Plus supports web search (not alongside HA tools)."
+    description: "Choose Qwen-Audio or Qwen Omni Realtime. Audio Flash is the low-cost voice-assistant option; Omni Plus offers the highest-quality model in this preview."
   qwen_model_custom:
     name: "🗣️ Qwen · Custom model"
     description: "Used only when Realtime model is set to custom."
@@ -54,15 +54,6 @@ configuration:
   phase_idle_debounce_ms:
     name: "💬 Conversation · End-of-reply hold"
     description: "Silence duration required before Voice PE returns to idle."
-  enable_web_search:
-    name: "🌐 Web search · Unavailable with Qwen tools"
-    description: "Keep off. Native Qwen Realtime cannot use Home Assistant function tools and web search in the same session."
-  web_search_model:
-    name: "🌐 Web search · Legacy option"
-    description: "Not used by the native Qwen Realtime configuration."
-  web_search_model_custom:
-    name: "🌐 Web search · Legacy custom option"
-    description: "Not used by the native Qwen Realtime configuration."
   playback_prebuffer_ms:
     name: "🎚️ Audio · Playback buffer"
     description: "Audio collected before Voice PE begins playback. Raise slightly for Wi-Fi jitter; lower for faster starts."

@@ -16,7 +16,7 @@ configuration:
     description: "可选 ISO 语言代码，例如 zh、en、nl；留空则由千问自动识别。"
   qwen_model:
     name: "🗣️ 千问 · Realtime 模型"
-    description: "下拉选择 Qwen-Audio 或 Qwen Omni Realtime。Audio Flash 适合低成本语音助手；Omni Plus 支持联网搜索（联网搜索不能与 HA 工具同时开启）。"
+    description: "下拉选择 Qwen-Audio 或 Qwen Omni Realtime。Audio Flash 适合低成本语音助手；Omni Plus 是本预览版中质量最高的模型。"
   qwen_model_custom:
     name: "🗣️ 千问 · 自定义模型"
     description: "仅当 Realtime 模型选择 custom 时使用。"
@@ -53,9 +53,6 @@ configuration:
   phase_idle_debounce_ms:
     name: "💬 对话 · 回复结束保持时间"
     description: "静音多久后 Voice PE 进入空闲状态。"
-  enable_web_search:
-    name: "🌐 网络搜索 · 千问工具模式不可用"
-    description: "请保持关闭。千问原生 Realtime 中，Home Assistant 工具调用与网络搜索不能同时启用。"
   playback_prebuffer_ms:
     name: "🎚️ 音频 · 播放预缓冲"
     description: "Voice PE 开始播放前积累的音频量；增大可缓冲 Wi‑Fi 抖动，减小可更快开口。"

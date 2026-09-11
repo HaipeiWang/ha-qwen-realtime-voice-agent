@@ -63,10 +63,6 @@ WAKE_AUDIO_GUARD_MS=$(config_value 'wake_audio_guard_ms')
 VAD_EAGERNESS=$(config_value 'vad_eagerness')
 PHASE_IDLE_DEBOUNCE_MS=$(config_value 'phase_idle_debounce_ms')
 
-# --- 🌐 Web search ---
-ENABLE_WEB_SEARCH=$(config_value 'enable_web_search')
-WEB_SEARCH_MODEL=$(config_value 'web_search_model')
-
 # --- 🎚️ Audio ---
 PLAYBACK_PREBUFFER_MS=$(config_value 'playback_prebuffer_ms')
 NOISE_REDUCTION=$(config_value 'noise_reduction')
@@ -119,8 +115,6 @@ export WAKE_OPEN_DELAY_MS
 export WAKE_AUDIO_GUARD_MS
 export VAD_EAGERNESS
 export PHASE_IDLE_DEBOUNCE_MS
-export ENABLE_WEB_SEARCH
-export WEB_SEARCH_MODEL
 export PLAYBACK_PREBUFFER_MS
 export NOISE_REDUCTION
 export LONGLIVED_TOKEN
@@ -154,10 +148,6 @@ if config_has_value 'qwen_voice_custom'; then
     QWEN_VOICE_CUSTOM=$(config_value 'qwen_voice_custom')
     export QWEN_VOICE_CUSTOM
 fi
-if config_has_value 'web_search_model_custom'; then
-    WEB_SEARCH_MODEL_CUSTOM=$(config_value 'web_search_model_custom')
-    export WEB_SEARCH_MODEL_CUSTOM
-fi
 if config_has_value 'transcription_model_custom'; then
     TRANSCRIPTION_MODEL_CUSTOM=$(config_value 'transcription_model_custom')
     export TRANSCRIPTION_MODEL_CUSTOM
@@ -186,8 +176,8 @@ if config_has_value 'vad_silence_duration_ms'; then
 fi
 
 # Removed options (v0.4.29) — no longer exported; main.py env defaults take
-# over: SEMANTIC_VAD_CREATE_RESPONSE=true, ENABLE_DISCONNECT_TOOL=false,
-# INTERRUPT_RESPONSE=false, DEVICE_INPUT_SAMPLE_RATE=16000.
+# over: SEMANTIC_VAD_CREATE_RESPONSE=true, INTERRUPT_RESPONSE=false,
+# DEVICE_INPUT_SAMPLE_RATE=16000.
 
 # Export HA_MCP_URL if set (empty string means use default in main.py)
 if [ -n "$HA_MCP_URL" ]; then

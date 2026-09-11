@@ -1,4 +1,4 @@
-"""Session management with context caching for OpenAI Realtime API."""
+"""Session management with context caching for realtime providers."""
 import logging
 import time
 from typing import Optional, Dict
@@ -10,7 +10,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregator,
     LLMUserAggregatorParams,
 )
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from app.core.service import RealtimeCoreService
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 from pipecat.frames.frames import Frame, StartFrame, LLMMessagesUpdateFrame
 
@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class RealtimeLLMUserAggregator(LLMUserAggregator):
-    """User aggregator that trusts OpenAI Realtime's server-side VAD.
+    """User aggregator that trusts the provider's server-side VAD.
 
     Pipecat normally fabricates EmulateUserStarted/StoppedSpeakingFrame when a
-    final transcription arrives after its aggregation timeout.  OpenAI
+    final transcription arrives after its aggregation timeout. The provider
     Realtime has already emitted the authoritative server-VAD turn boundaries,
     so that fallback turns one utterance into a second, late interruption.  It
     is especially reproducible in Chinese: final transcripts arrived 560-623
@@ -69,7 +69,7 @@ class ContextCacheEntry:
 
 
 class SessionManager:
-    """Manages OpenAI Realtime sessions with context caching per client device.
+    """Manages realtime sessions with context caching per client device.
     
     For each new WebSocket connection, a new session is created, but the context
     from previous sessions for the same client is preserved if the last connection
@@ -83,7 +83,7 @@ class SessionManager:
             reuse_timeout: Time in seconds after which cached context expires
             max_restored_messages: Cap on how many of the most-recent cached
                 messages are restored into a new session (0 = unlimited). The
-                OpenAI Realtime conversation grows server-side and pipecat 0.0.97
+                The provider conversation grows server-side and pipecat 0.0.97
                 has no truncation, so every response.create re-bills the whole
                 history (audio transcripts + tool results). The device reconnects
                 often (follow-up windows, keepalive drops), and each reconnect
@@ -97,7 +97,7 @@ class SessionManager:
         # Dictionary mapping client_id to ContextCacheEntry
         self.context_caches: Dict[str, ContextCacheEntry] = {}
         # Dictionary mapping client_id to current service
-        self.current_services: Dict[str, OpenAIRealtimeLLMService] = {}
+        self.current_services: Dict[str, RealtimeCoreService] = {}
         # Dictionary mapping client_id to context aggregator pair
         self.context_aggregators: Dict[str, LLMContextAggregatorPair] = {}
     
@@ -125,12 +125,12 @@ class SessionManager:
             del self.context_caches[client_id]
             return None
     
-    def cache_context_from_service(self, client_id: str, service: OpenAIRealtimeLLMService):
+    def cache_context_from_service(self, client_id: str, service: RealtimeCoreService):
         """Extract and cache context from a service before it's closed.
         
         Args:
             client_id: Unique identifier for the client device
-            service: The OpenAI Realtime service to extract context from
+            service: The realtime service to extract context from
         """
         # First try to get context from the context aggregator (more reliable)
         context = None
@@ -138,13 +138,13 @@ class SessionManager:
             aggregator_pair = self.context_aggregators[client_id]
             # The context is shared between user and assistant aggregators
             user_aggregator = aggregator_pair.user()
-            if hasattr(user_aggregator, '_context') and user_aggregator._context:
-                context = user_aggregator._context
+            if user_aggregator.context:
+                context = user_aggregator.context
                 logger.debug(f"🔍 Found context in aggregator for client {client_id}")
         
         # Fallback: try to get context from service
-        if not context and service and hasattr(service, '_context') and service._context:
-            context = service._context
+        if not context and service and hasattr(service, 'context') and service.context:
+            context = service.context
             logger.debug(f"🔍 Found context in service for client {client_id}")
         
         # Cache the context if we found one
@@ -161,9 +161,9 @@ class SessionManager:
                 logger.warning(f"⚠️ No service provided to cache context for client {client_id}")
             elif client_id not in self.context_aggregators:
                 logger.warning(f"⚠️ No context aggregator found for client {client_id}")
-            elif not hasattr(service, '_context'):
+            elif not hasattr(service, 'context'):
                 logger.warning(f"⚠️ Service has no '_context' attribute for client {client_id}")
-            elif not service._context:
+            elif not service.context:
                 logger.warning(f"⚠️ Service context is None for client {client_id}")
             else:
                 logger.debug(f"No context to cache from service for client {client_id}")
@@ -216,23 +216,23 @@ class SessionManager:
             logger.info(f"🆕 Creating new empty context for client {client_id}")
             return LLMContext()
     
-    def get_current_service(self, client_id: str) -> Optional[OpenAIRealtimeLLMService]:
-        """Get current OpenAI service for a specific client.
+    def get_current_service(self, client_id: str) -> Optional[RealtimeCoreService]:
+        """Get the current realtime service for a specific client.
         
         Args:
             client_id: Unique identifier for the client device
             
         Returns:
-            Current OpenAIRealtimeLLMService if exists, None otherwise
+            Current RealtimeCoreService if exists, None otherwise
         """
         return self.current_services.get(client_id)
     
-    def set_current_service(self, client_id: str, service: OpenAIRealtimeLLMService):
+    def set_current_service(self, client_id: str, service: RealtimeCoreService):
         """Set the current active service for a client.
         
         Args:
             client_id: Unique identifier for the client device
-            service: The currently active OpenAI Realtime service
+            service: The currently active realtime service
         """
         self.current_services[client_id] = service
     
@@ -304,7 +304,7 @@ class SessionManager:
             )
         return None
     
-    def handle_client_disconnect(self, client_id: str, service: Optional[OpenAIRealtimeLLMService] = None):
+    def handle_client_disconnect(self, client_id: str, service: Optional[RealtimeCoreService] = None):
         """Handle client disconnection by caching context.
         
         Args:
@@ -358,7 +358,7 @@ class ContextInitializer(FrameProcessor):
                     # The bot will wait for the user to speak first
                     update_frame = LLMMessagesUpdateFrame(messages=messages, run_llm=False)
                     await self.context_aggregator.user().push_frame(update_frame)
-                    logger.info(f"📤 Sent cached context ({len(messages)} messages) to OpenAI for client {self.client_id} (waiting for user)")
+                    logger.info(f"📤 Sent cached context ({len(messages)} messages) to realtime provider for client {self.client_id} (waiting for user)")
                     self.context_sent = True
             return
         

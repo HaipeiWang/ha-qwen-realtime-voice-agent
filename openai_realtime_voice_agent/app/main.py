@@ -9,16 +9,13 @@ import dotenv
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from app.core.service import RealtimeCoreService
 from pipecat.transports.websocket.server import WebsocketServerTransport
 from app.mcp_service import HomeAssistantMCPService
-from app.phase_emitter import TURN_LIVENESS
-from app.disconnect_tool import get_disconnect_tool_definition, create_disconnect_tool_handler
-from app.web_search_tool import get_web_search_tool_definition, create_web_search_tool_handler
 from app.audio_recording_service import AudioRecordingService
 from app.session_manager import SessionManager
 from app.websocket_handler import WebSocketHandler
-from app.qwen_realtime import QwenRealtimeLLMService
+from app.providers.factory import create_qwen_service
 from app.control_intent_router import (
     EntityCatalog,
     ControlIntentRouter,
@@ -27,6 +24,13 @@ from app.control_intent_router import (
 from app.ha_tool_builder import GeneratedTool, build_generated_tools
 from app.tool_names import canonical_tool_name
 from app.tool_policy import parse_tool_allowlist, resolve_tool_allowlist
+from app.tools.registry import ToolRegistry
+from app.core.arbitration import ControlArbiter
+from app.core.control_dispatch import ControlDispatch
+from app.tools.schema import CanonicalTool, CanonicalToolRequest
+from app.tools.facts import FactTools
+from app.tools.ha_facts import HAFactsBackend, exposed_entity_ids
+import httpx
 
 # Configure logging
 logging.basicConfig(
@@ -64,236 +68,8 @@ def _resolve_choice(env_var: str, custom_env_var: str, default: str) -> str:
 dotenv.load_dotenv()
 
 
-class SafeRealtimeLLMService(QwenRealtimeLLMService):
-    """OpenAIRealtimeLLMService with audio-truncation-on-interruption disabled.
-
-    pipecat's `_truncate_current_audio_response()` (called by `_handle_interruption`
-    on EVERY interruption — both our device "stop" AND pipecat's own server-VAD
-    barge-in when the user wakes/speaks mid-reply) sends a
-    `conversation.item.truncate` with `audio_end_ms = wall-clock ms since audio
-    start`. But OpenAI BURSTS the reply faster than real-time, so that elapsed
-    value massively overshoots the audio that actually exists, and OpenAI rejects
-    it with `invalid_request_error("Audio content of N ms is already shorter than
-    M ms")`. That errored truncate wedges the realtime session, so the user's very
-    next turn gets NO response — the recurring "interrupt, then immediately ask
-    again → silence" bug (confirmed in logs: session goes quiet right after
-    `_truncate_current_audio_response`).
-
-    The device stops playback authoritatively on its own, so server-side
-    truncation buys us nothing. No-op it. (Cost: OpenAI's conversation history
-    keeps the full assistant text the user may not have fully heard — purely
-    cosmetic for context.)
-    """
-
-    async def _truncate_current_audio_response(self):  # type: ignore[override]
-        return
-
-    async def reset_conversation(self):  # type: ignore[override]
-        """Reconnect WITHOUT forcing a response on the reconnected session.
-
-        pipecat's reset_conversation() (used by ConnectionRecovery on a 60-min cap
-        / keepalive drop) reconnects and leaves `_llm_needs_conversation_setup =
-        True`. The collision: if a turn was mid-flight when the WS dropped,
-        `_create_response()` had already set `_run_llm_when_api_session_ready =
-        True` (because `_api_session_ready` went False on disconnect). After the
-        reconnect, the `session.updated` handler sees that flag and fires
-        `_create_response()` — but under semantic_vad (`create_response=true`) the
-        SERVER also auto-creates a response for the user's next turn. Two
-        response.create events collide → `conversation_already_has_active_response`,
-        and that turn gets no answer (observed: first turn right after a reconnect
-        fails, ~1 in 20 reconnects — whenever the user happens to speak in the few
-        seconds just after a reconnect).
-
-        Fix: after the normal reconnect, clear `_run_llm_when_api_session_ready` so
-        the reconnected session does NOT self-create a response, and set
-        `_llm_needs_conversation_setup = False` (same as the startup pre-seed) — the
-        server-VAD drives every user-turn response, so we never need to create one
-        ourselves on reconnect. The live context is untouched (it's restored by the
-        SessionManager on the next real turn).
-        """
-        await super().reset_conversation()
-        try:
-            self._run_llm_when_api_session_ready = False
-            self._llm_needs_conversation_setup = False
-        except Exception as e:  # pragma: no cover - defensive
-            logger.warning(f"⚠️ could not clear post-reconnect response flags: {e!r}")
-
-    # Error codes that must NOT kill the realtime session. pipecat 0.0.97's
-    # _receive_task_handler does `_handle_evt_error(evt); return` on EVERY
-    # error event — the reader task dies, the in-flight reply cuts off
-    # mid-sentence and the session is deaf until the next connection death.
-    # Observed live (2026-06-10): semantic_vad split one utterance into two
-    # turns, the server's auto-created second response collided with the
-    # first → conversation_already_has_active_response → the playing reply
-    # stopped at 4.4 s and the session wedged. These codes are harmless
-    # protocol races; the right move is to keep reading.
-    BENIGN_ERROR_CODES = {
-        # The server auto-created a response while one was still active
-        # (VAD split a sentence into two turns). The active response keeps
-        # streaming — nothing is broken.
-        "conversation_already_has_active_response",
-        # response.cancel landed after the response already finished (device
-        # "stop" / the post-interrupt racing-response kill) — nothing to
-        # cancel, nothing broken.
-        "response_cancel_not_active",
-        # input_audio_buffer.commit raced our input_audio_buffer.clear (device
-        # "stop"): an empty commit is exactly the outcome we wanted.
-        "input_audio_buffer_commit_empty",
-    }
-
-    async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt):  # type: ignore[override]
-        """Generic benign-error filter, hooked into pipecat's receive loop.
-
-        pipecat's `_receive_task_handler` treats a True return from this
-        method as "error handled — keep the receive loop alive"; every other
-        error event kills the reader task (`_handle_evt_error` + `return`).
-        It is the ONLY surviving path, so besides the original retrieve-item
-        case (super()), we declare our benign protocol races handled here
-        instead of letting them cut off live audio and wedge the session.
-        """
-        if await super()._maybe_handle_evt_retrieve_conversation_item_error(evt):
-            return True
-        code = getattr(getattr(evt, "error", None), "code", None)
-        if code in self.BENIGN_ERROR_CODES:
-            logger.warning(
-                f"⚠️ benign realtime error ignored (session stays alive): {code}"
-            )
-            return True
-        return False
-
-    def register_function(self, function_name, handler, start_callback=None, *,
-                          cancel_on_interruption: bool = True):  # type: ignore[override]
-        """Force cancel_on_interruption=False for every tool registration.
-
-        pipecat cancels in-flight function-call tasks on EVERY user-speech
-        interruption — and semantic_vad fires one per utterance fragment, so
-        merely continuing your own sentence kills the tool call your previous
-        fragment started. By then the HTTP request to Home Assistant has
-        usually already been SENT: the action executes, but its result never
-        reaches the model, which then tells the user it failed (observed
-        live: the lights turned ON while the assistant claimed they
-        wouldn't). Our tools are all short-lived (HA service calls, one web
-        search), so letting them finish and report the truth always beats
-        killing them halfway. This single override covers every registration
-        path (MCP tools via pipecat's MCPClient, web_search, disconnect).
-
-        The handler is also wrapped to tick TURN_LIVENESS around its run, so
-        the PhaseEmitter's thinking-watchdog knows a tool is in flight and a
-        slow tool (web search: 10-20 s of pipeline silence) is never mistaken
-        for a dead turn. All our handlers use the single-param
-        FunctionCallParams signature, so the wrapper does too (pipecat
-        inspects the signature to pick the calling convention).
-        """
-        async def liveness_tracked(params):
-            TURN_LIVENESS.tool_started()
-            result_sent = False
-            original_result_callback = params.result_callback
-
-            async def tracked_result_callback(result, *, properties=None):
-                nonlocal result_sent
-                if result_sent:
-                    logger.warning(
-                        "Duplicate MCP result ignored: tool=%s call_id=%s",
-                        params.function_name, params.tool_call_id,
-                    )
-                    return
-                result_sent = True
-                payload = result
-                if isinstance(result, str):
-                    try:
-                        payload = json.loads(result)
-                    except (json.JSONDecodeError, TypeError):
-                        payload = None
-                success = (
-                    payload.get("success", True)
-                    if isinstance(payload, dict)
-                    else True
-                )
-                status = (
-                    payload.get("status", "completed")
-                    if isinstance(payload, dict)
-                    else "completed"
-                )
-                logger.info(
-                    "MCP execution completed: tool=%s call_id=%s success=%s status=%s",
-                    params.function_name, params.tool_call_id, success, status,
-                )
-                await original_result_callback(result, properties=properties)
-
-            # FunctionCallParams is a mutable dataclass in Pipecat 0.0.97.
-            # Tracking the real callback lets us distinguish dispatch from a
-            # completed MCP request and prevents duplicate failure results.
-            params.result_callback = tracked_result_callback
-            try:
-                result = await asyncio.wait_for(
-                    handler(params), timeout=self._tool_timeout_s
-                )
-                if not result_sent:
-                    logger.error(
-                        "MCP handler returned without a result: tool=%s call_id=%s",
-                        params.function_name, params.tool_call_id,
-                    )
-                    await tracked_result_callback({
-                        "success": False,
-                        "tool": params.function_name,
-                        "error": "Home Assistant operation returned no result",
-                    })
-                return result
-            except asyncio.TimeoutError:
-                logger.exception(
-                    "MCP execution timed out after %.1fs: tool=%s call_id=%s",
-                    self._tool_timeout_s, params.function_name, params.tool_call_id,
-                )
-                if not result_sent:
-                    await tracked_result_callback({
-                        "success": False,
-                        "tool": params.function_name,
-                        "error": "Home Assistant operation timed out",
-                    })
-            except Exception:
-                logger.exception(
-                    "MCP execution failed: tool=%s call_id=%s",
-                    params.function_name, params.tool_call_id,
-                )
-                if not result_sent:
-                    await tracked_result_callback({
-                        "success": False,
-                        "tool": params.function_name,
-                        "error": "Home Assistant operation failed",
-                    })
-            finally:
-                TURN_LIVENESS.tool_finished()
-
-        super().register_function(
-            function_name, liveness_tracked, start_callback, cancel_on_interruption=False
-        )
-
-    async def _receive_task_handler(self, *args, **kwargs):  # type: ignore[override]
-        """Surface OpenAI reader death as an ErrorFrame so recovery can act.
-
-        pipecat's receive loop can end without producing ANY ErrorFrame: a
-        silent server-side close ends the `async for` normally, and a network
-        drop raises ConnectionClosed, which the task manager merely LOGS
-        ("unexpected exception"). Nothing reaches ConnectionRecovery either
-        way, so the session sat deaf for HOURS until the next user utterance
-        hit the dead socket — losing that utterance (observed live twice).
-        Wrap the loop and report its end; ConnectionRecovery treats the
-        message as a reconnect trigger.
-        """
-        try:
-            await super()._receive_task_handler(*args, **kwargs)
-        except asyncio.CancelledError:
-            raise  # our own disconnect/reset tearing the task down — not a death
-        except Exception as e:
-            if getattr(self, "_disconnecting", False):
-                return
-            await self.push_error(error_msg=f"realtime receive loop died: {e!r}")
-            return
-        # Loop ended without an exception: a clean server-side close, or the
-        # fatal-error path (which already pushed its own ErrorFrame —
-        # duplicates collapse in ConnectionRecovery's cooldown/guard).
-        if not getattr(self, "_disconnecting", False):
-            await self.push_error(error_msg="realtime receive loop ended — connection closed")
+# Provider composition is outside Core; retained name for local callers.
+SafeRealtimeLLMService = create_qwen_service
 
 
 class Application:
@@ -305,7 +81,7 @@ class Application:
         self.runner: Optional[PipelineRunner] = None
         self.websocket_handler: Optional[WebSocketHandler] = None
         self.websocket_transport: Optional[WebsocketServerTransport] = None
-        self.openai_service: Optional[OpenAIRealtimeLLMService] = None
+        self.openai_service: Optional[RealtimeCoreService] = None
         self.mcp_service: Optional[HomeAssistantMCPService] = None
         self.audio_recording_service: Optional[AudioRecordingService] = None
         self.session_manager: Optional[SessionManager] = None
@@ -354,13 +130,6 @@ class Application:
         # server makes it. FALSE reproduces the old single-turn-only behaviour
         # (turn 1 answers, turn 2 hangs in "thinking"). See _ensure_openai_service.
         semantic_vad_create_response = os.environ.get("SEMANTIC_VAD_CREATE_RESPONSE", "true").strip().lower() == "true"
-        # Expose the `disconnect_client` tool to the model. DEFAULT FALSE: on the
-        # Voice PE the device owns its own session lifecycle (wake word starts a
-        # turn, the no-speech watchdog / idle phase ends it), so a model-driven
-        # disconnect just tears down the persistent WebSocket mid-conversation —
-        # it was seen closing the socket DURING the first reply ("conversation_ended").
-        # Only enable if your device relies on the backend to hang up.
-        enable_disconnect_tool = os.environ.get("ENABLE_DISCONNECT_TOOL", "false").strip().lower() == "true"
         # Pin the input-transcription language (ISO code, e.g. "nl"). Empty = let
         # the model auto-detect. Helps stop the model drifting to another
         # language; pair it with an explicit language lock in `instructions`.
@@ -433,22 +202,6 @@ class Application:
             if c.strip()
         ]
         
-        # Qwen Realtime's native web search and function tools are mutually
-        # exclusive. This bridge exposes HA MCP tools, so deliberately disable
-        # the old OpenAI Responses web-search helper rather than sending the
-        # Qwen key to a different provider.
-        # Web search: let the assistant look things up online (weather, news,
-        # facts). ON by default; existing installs keep their saved option, so an
-        # Update won't silently flip it. When on, a `web_search` function tool
-        # calls OpenAI's Responses web_search built-in tool server-side (using
-        # OPENAI_API_KEY) and returns a short spoken answer. The model is
-        # configurable so a different price/quality — or a renamed model — needs
-        # no code change.
-        enable_web_search = False
-        web_search_model = _resolve_choice(
-            "WEB_SEARCH_MODEL", "WEB_SEARCH_MODEL_CUSTOM", "gpt-5.5"
-        )
-
         # Get recording setting (optional, defaults to false)
         enable_recording = os.environ.get("ENABLE_RECORDING", "false").lower() == "true"
         
@@ -542,6 +295,13 @@ class Application:
                     )
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to build deterministic entity catalog: {e}")
+                try:
+                    from app.tools.ha_aliases import enrich_aliases
+                    self.entity_catalog = await enrich_aliases(
+                        self.entity_catalog, os.environ.get("HA_REST_URL", "http://supervisor/core"),
+                        supervisor_token)
+                except Exception:
+                    logger.warning("HA aliases unavailable; retaining exposed canonical names only")
                 # Auto-discover device capabilities and generate extra tools
                 # (climate mode/fan/swing, fan preset, select option). Runs on
                 # every start so newly added devices get their tools on the
@@ -599,7 +359,6 @@ class Application:
         self.vad_eagerness = vad_eagerness
         self.interrupt_response = interrupt_response
         self.semantic_vad_create_response = semantic_vad_create_response
-        self.enable_disconnect_tool = enable_disconnect_tool
         self.transcription_language = transcription_language
         self.transcription_model = transcription_model
         self.instructions = instructions
@@ -610,8 +369,6 @@ class Application:
         self.noise_reduction = noise_reduction
         self.mcp_tool_allowlist = mcp_tool_allowlist
         self.mcp_client = mcp_client
-        self.enable_web_search = enable_web_search
-        self.web_search_model = web_search_model
 
         # Initialize audio recording service (optional)
         self.audio_recording_service = AudioRecordingService(
@@ -689,18 +446,8 @@ class Application:
                 InputAudioNoiseReduction,
             )
             
-            # Collect all tool definitions for session properties. The
-            # disconnect_client tool is opt-in (see enable_disconnect_tool): by
-            # default we do NOT expose it, so the model can't hang up the device
-            # mid-conversation.
+            # Collect tool definitions for the provider session.
             all_tools = []
-            if self.enable_disconnect_tool:
-                all_tools.append(get_disconnect_tool_definition())
-
-            # Web search tool (optional). Lets the model look things up online via
-            # a secondary OpenAI Responses web_search call in the handler.
-            if self.enable_web_search:
-                all_tools.append(get_web_search_tool_definition())
 
             # Get MCP tool definitions if available
             mcp_tools_schema = None
@@ -765,30 +512,45 @@ class Application:
                     "Adding %d auto-generated capability tools: %s",
                     len(added_generated), [g.name for g in added_generated],
                 )
+
+            # These facts use the same dispatch/result path as HA controls.
+            token = os.environ.get("LONGLIVED_TOKEN") or os.environ.get("SUPERVISOR_TOKEN")
+            fact_handlers = {}
+            if token:
+                base_url = os.environ.get("HA_REST_URL", "http://supervisor/core").rstrip("/")
+
+                def make_fact_handler(tool_name):
+                    async def fact_handler(params):
+                        async with httpx.AsyncClient(
+                            base_url=base_url + "/", headers={"Authorization": f"Bearer {token}"},
+                            timeout=10, follow_redirects=False,
+                        ) as client:
+                            async def exposure():
+                                return await exposed_entity_ids(base_url, token)
+                            facts = ToolRegistry()
+                            FactTools(HAFactsBackend(client, exposure)).register(facts)
+                            outcome = await facts.execute(CanonicalToolRequest(
+                                "facts", "facts", params.tool_call_id, tool_name, params.arguments,
+                            ))
+                            await params.result_callback(outcome)
+                    return fact_handler
+
+                from app.tools.facts import TIME_TOOL, WEATHER_TOOL
+                for definition in (TIME_TOOL, WEATHER_TOOL):
+                    if definition.name not in {t.get("name") for t in all_tools}:
+                        all_tools.append({"type": "function", "name": definition.name,
+                                          "description": definition.description,
+                                          "parameters": definition.parameters})
+                        fact_handlers[definition.name] = make_fact_handler(definition.name)
             
             # Turn detection: semantic_vad (recommended — semantic end-of-turn,
             # echo-resistant, doesn't cut the user off) or classic server_vad.
             if self.turn_detection_type == "semantic_vad":
                 turn_detection = SemanticTurnDetection(
                     eagerness=self.vad_eagerness,
-                    # create_response=True (default): the SERVER creates a
-                    # response on every detected end-of-turn. This is required for
-                    # multi-turn conversation. Pipecat 0.0.97's
-                    # OpenAIRealtimeLLMService._handle_context only auto-creates a
-                    # response for the FIRST context (turn 1) and after tool
-                    # results (its else-branch just updates the context); a plain
-                    # 2nd/3rd user turn therefore gets NO response unless the
-                    # server makes it. We previously set this False to stop a
-                    # turn-1 double-response (server + Pipecat first-context both
-                    # creating → `conversation_already_has_active_response`), but
-                    # that silently broke every turn after the first (device hung
-                    # in "thinking"). True is the correct trade: the server drives
-                    # all user-turn responses; Pipecat still creates the post-tool
-                    # response via _process_completed_function_calls. To stop the
-                    # turn-1 double (server + Pipecat-first-context both creating →
-                    # conversation_already_has_active_response), run() seeds
-                    # self._context once at startup with a kickoff LLMRunFrame, so
-                    # the user's first real turn hits the else-branch too.
+                    # Provider configuration controls automatic user-turn responses.
+                    # Shared Core schedules post-tool responses; context updates
+                    # alone never trigger generation.
                     create_response=self.semantic_vad_create_response,
                     interrupt_response=self.interrupt_response,
                 )
@@ -861,7 +623,32 @@ class Application:
                 start_audio_paused=False
             )
             logger.info(f"✅ Qwen Realtime Service created: {type(self.openai_service).__name__}")
+            self.openai_service.tool_definitions = {
+                tool["name"]: CanonicalTool(tool["name"], tool.get("description", ""),
+                    tool.get("parameters", {"type": "object", "properties": {}}),
+                    read_only=canonical_tool_name(tool["name"]) in {"GetLiveContext", "GetCurrentTime", "GetWeather", "web_search"})
+                for tool in all_tools
+            }
             self.openai_service.entity_catalog = self.entity_catalog or EntityCatalog()
+            async def control_attributes(name):
+                if not token:
+                    raise PermissionError("HA authorization unavailable")
+                from urllib.parse import quote
+                ids = await exposed_entity_ids(base_url, token)
+                async with httpx.AsyncClient(base_url=base_url + "/",
+                        headers={"Authorization": f"Bearer {token}"}, timeout=10,
+                        follow_redirects=False) as client:
+                    async def state(entity_id):
+                        response = await client.get("api/states/" + quote(entity_id, safe=""))
+                        response.raise_for_status()
+                        return response.json()
+                    states = await asyncio.gather(*(state(i) for i in sorted(ids) if i.startswith("light.")))
+                matches = [s for s in states if (s.get("attributes") or {}).get("friendly_name") == name]
+                if len(matches) != 1 or matches[0].get("state") in {"unknown", "unavailable"}:
+                    raise ValueError("Unique available exposed light required")
+                return matches[0].get("attributes") or {}
+            self.openai_service.control_dispatch = ControlDispatch(
+                ControlArbiter(self.openai_service.entity_catalog), control_attributes)
             self.openai_service.control_router = ControlIntentRouter(
                 self.openai_service.entity_catalog,
                 dynamic_rules=[
@@ -871,25 +658,15 @@ class Application:
                 ],
             )
             
-            # Register disconnect tool handler (only when the tool is exposed)
-            if self.enable_disconnect_tool:
-                disconnect_tool_handler = create_disconnect_tool_handler(self.websocket_transport)
-                self.openai_service.register_function("disconnect_client", disconnect_tool_handler)
-                logger.info("✅ Registered disconnect tool handler")
-
-            # Register web search tool handler (only when the tool is exposed)
-            if self.enable_web_search:
-                self.openai_service.register_function(
-                    "web_search",
-                    create_web_search_tool_handler(self.openai_api_key, self.web_search_model),
-                )
-                logger.info(f"✅ Registered web_search tool handler (model={self.web_search_model})")
-            
             # Register MCP tool handlers if available
             if self.mcp_client and mcp_tools_schema:
                 try:
-                    await self.mcp_client.register_tools_schema(mcp_tools_schema, self.openai_service)
-                    logger.info(f"✅ Registered {len(mcp_tools_schema.standard_tools)} MCP tool handlers")
+                    from pipecat.adapters.schemas.tools_schema import ToolsSchema
+                    registered_schema = ToolsSchema(standard_tools=[
+                        schema for schema in mcp_tools_schema.standard_tools
+                        if schema.name in self.openai_service.tool_definitions])
+                    await self.mcp_client.register_tools_schema(registered_schema, self.openai_service)
+                    logger.info(f"✅ Registered {len(registered_schema.standard_tools)} MCP tool handlers")
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to register MCP tool handlers: {e}")
 
@@ -899,6 +676,9 @@ class Application:
                 self.openai_service.register_function(gen.name, gen.handler)
             if added_generated:
                 logger.info(f"✅ Registered {len(added_generated)} auto-generated tool handlers")
+
+            for name, handler in fact_handlers.items():
+                self.openai_service.register_function(name, handler)
             
             # Register service with session manager
             if client_id:
@@ -920,52 +700,8 @@ class Application:
         # The transport manages multiple connections internally
         self._build_pipeline_for_transport(self.websocket_transport, "server")
 
-        # Consume pipecat's FIRST-context auto-response ONCE at startup — SILENTLY.
-        # WHY: pipecat 0.0.97's OpenAIRealtimeLLMService._handle_context does
-        # `if not self._context: ... await self._create_response()` — i.e. the
-        # very first context it ever sees triggers a real response. With
-        # semantic_vad create_response=True the SERVER also creates a response on
-        # every user turn, so the user's first turn would double-create →
-        # `conversation_already_has_active_response` (cut turn 1 short, hung
-        # turn 2). We previously consumed that path with a throwaway LLMRunFrame
-        # kickoff — but an LLMRunFrame runs `_create_response()`, producing a REAL
-        # (audible, tool-calling) reply. The old comment assumed it "goes to no
-        # device" because nothing is connected at startup; WRONG: when the user
-        # updates the add-on the device auto-reconnects within seconds and lands
-        # mid-kickoff (and its post-tool follow-up), so the device plays a
-        # spontaneous "answer" nobody asked for (observed: "Ik vond geen
-        # betrouwbare lamp in de gang" right after a restart).
-        #
-        # Fix: pre-set `self._context` to an empty LLMContext instead. Now the
-        # first REAL user turn hits the ELSE branch of _handle_context (no
-        # _create_response), the server creates that turn's response (semantic_vad
-        # create_response=True), and there's no double — AND no startup speech.
-        # The empty sentinel is harmlessly overwritten by the real context on the
-        # first turn (both branches do `self._context = context`).
-        if self.turn_detection_type == "semantic_vad" and self.semantic_vad_create_response:
-            try:
-                from pipecat.processors.aggregators.llm_context import LLMContext
-                if self.openai_service is not None and getattr(self.openai_service, "_context", None) is None:
-                    self.openai_service._context = LLMContext()
-                    # Also mark pipecat's one-time "conversation setup" as already
-                    # done. pipecat runs it on the FIRST _create_response: it
-                    # re-sends the context's messages as ConversationItemCreate
-                    # events, then flips _llm_needs_conversation_setup False. On a
-                    # fresh realtime session OpenAI already builds the conversation
-                    # from the live audio + tool-call flow, so that one-time setup
-                    # re-injects items OpenAI already has — which made the first
-                    # post-tool reply come out as a meaningless filler ("Ik ben
-                    # klaar om verder te gaan met het gesprek."). Instructions are
-                    # sent independently via _update_settings() on session.created,
-                    # so clearing this flag is safe and makes the first real turn a
-                    # normal reply.
-                    if hasattr(self.openai_service, "_llm_needs_conversation_setup"):
-                        self.openai_service._llm_needs_conversation_setup = False
-                    logger.info("🌱 Pre-seeded empty context + marked conversation setup done (no startup speech, no first-turn filler)")
-                else:
-                    logger.info("🌱 Startup context already set; skipping pre-seed")
-            except Exception as e:
-                logger.warning(f"⚠️ Could not pre-seed startup context (turn-1 double may occur): {e}")
+        # Core never creates a response from a cached/context-only update.
+        # Provider generation starts only at wake and real input/tool boundaries.
 
         # Setup WebSocket event handlers
         async def on_client_connected(client_id: str):
@@ -986,7 +722,7 @@ class Application:
                 self.audio_recording_service.stop_recording()
         
         # Function to get OpenAI service for a client
-        def get_openai_service_for_client(client_id: str) -> Optional[OpenAIRealtimeLLMService]:
+        def get_openai_service_for_client(client_id: str) -> Optional[RealtimeCoreService]:
             """Get OpenAI service for a specific client."""
             if self.session_manager:
                 return self.session_manager.get_current_service(client_id)

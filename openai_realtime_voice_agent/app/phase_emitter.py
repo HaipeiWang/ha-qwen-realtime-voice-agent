@@ -1,65 +1,9 @@
-"""Emit va_client phase messages from Pipecat speaking frames.
+"""Emit provider-independent Voice PE phase messages.
 
-The Home Assistant Voice PE firmware (maxmaxme `va_client` component) drives its
-LED ring, mic-streaming gate and a 7 s no-speech watchdog from `phase` JSON
-messages sent by the backend:
-
-    {"type": "phase", "value": "listening" | "thinking" | "replying" | "idle"}
-
-Without these messages the device aborts each turn after the watchdog fires, so
-emitting them is required (not just cosmetic). This processor maps Pipecat's
-standard speaking frames onto those phases and forwards them to the device over
-the websocket as TEXT frames.
-
-Mapping:
-    UserStartedSpeakingFrame  -> listening   (server VAD heard the user)
-    UserStoppedSpeakingFrame  -> thinking    (generating a response)
-    BotStartedSpeakingFrame   -> replying    (TTS audio is playing)
-    BotStoppedSpeakingFrame   -> idle, but DEBOUNCED (see below)
-
-IMPORTANT — idle debounce:
-    OpenAI Realtime TTS arrives in segments (per sentence, and around tool
-    calls), so BotStoppedSpeakingFrame fires several times *within a single
-    reply*, with sub-second gaps before the next BotStartedSpeakingFrame. If we
-    emitted "idle" on every BotStoppedSpeakingFrame the device's LED would flap
-    replying -> idle -> replying mid-answer, and — because the firmware only
-    arms the "stop" wake word during "replying" — the user would briefly lose
-    the ability to interrupt. So we do NOT go idle immediately on BotStopped:
-    we arm a short timer and only emit "idle" if no further bot/user speech
-    starts before it elapses (i.e. the reply has truly finished). Any
-    Bot/UserStartedSpeaking cancels the pending idle.
-
-A barge-in mid-reply surfaces as a fresh UserStartedSpeakingFrame -> "listening"
-(which cancels the pending idle); the firmware uses that to flush playback.
-
-IMPORTANT — thinking watchdog + forced idle (v0.5.3):
-    `thinking` is the one phase with no natural exit when a turn dies without
-    a reply: a rate-limited / failed response.create produces no Bot frames,
-    so the device blinks "thinking" forever WITH AN OPEN MIC (observed live
-    2026-06-12: 44 s stuck, during which the mic picked up unrelated talking
-    and the model answered it). Two defenses here:
-
-    1. `force_idle(reason)` — the turn-death paths (ConnectionRecovery's
-       rate-limit unstick + reconnect) call this INSTEAD of broadcasting idle
-       around this processor, so the internal state stays consistent, AND it
-       suppresses subsequent `thinking` emissions until real activity (user
-       or bot speech) follows. Without the suppression, a VAD stop event
-       already in flight re-emits `thinking` right after the unstick idle —
-       the exact 400 ms race observed.
-    2. A thinking watchdog — if `thinking` sees no model activity for
-       THINKING_TIMEOUT_S it forces idle as a generic safety net (covers
-       turn deaths that produce no ErrorFrame at all). While a tool call is
-       in flight (TURN_LIVENESS; tool handlers are wrapped in
-       SafeRealtimeLLMService.register_function to tick it) the watchdog
-       WAITS WITH NO CAP — explicit user decision 2026-06-12: a long web
-       search on a hard question must get all the time it needs, the user
-       knowingly waits. This cannot wait forever: every tool is bounded by
-       its own client timeout (MCP ~30 s HTTP; web search the OpenAI
-       client's 600 s default, whose except-path feeds the model a spoken
-       error), and the wrapper's `finally` guarantees in_flight always
-       drops back to 0 — after which the normal THINKING_TIMEOUT_S window
-       applies again. If a slow-but-alive turn is ever cut off, the late
-       reply still plays (BotStarted -> replying) — degraded but never stuck.
+Standard user and assistant speaking frames map to listening, thinking, replying
+and idle. Idle is debounced because streamed speech can contain sentence and tool
+boundaries. A watchdog returns the device to idle when a failed turn produces no
+closing frame, while active bounded tool calls keep that watchdog alive.
 """
 import asyncio
 import logging
@@ -86,8 +30,8 @@ class TurnLiveness:
 
     Tool handlers are wrapped (see SafeRealtimeLLMService.register_function in
     main.py) to tick this on start/finish. The PhaseEmitter's thinking
-    watchdog reads it so a slow tool — web search regularly takes 10-20 s with
-    zero pipeline traffic — is never mistaken for a dead turn, and so each
+    watchdog reads it so a slow tool with no pipeline traffic is never mistaken
+    for a dead turn, and so each
     step of a long tool chain refreshes the window. Module-level singleton:
     one pipeline per process.
     """
@@ -130,7 +74,7 @@ class PhaseEmitter(FrameProcessor):
             idle_debounce_s: seconds the bot must stay silent after a reply
                 before we declare the turn idle. Defaults to the
                 PHASE_IDLE_DEBOUNCE_MS env var (1500 ms) — long enough to bridge
-                the inter-sentence / tool-call gaps in OpenAI Realtime TTS so the
+                inter-sentence or tool-call gaps in realtime speech so the
                 LED and the "stop" wake word stay active for the whole answer.
         """
         super().__init__(**kwargs)
@@ -243,11 +187,11 @@ class PhaseEmitter(FrameProcessor):
             await asyncio.sleep(self._idle_debounce_s)
         except asyncio.CancelledError:
             return
-        # A tool (web search, MCP call) can still be running when the filler
+        # A tool can still be running when the filler
         # reply's debounce expires — the turn isn't over, the model is
         # "thinking" while it waits for the tool. Going idle here makes the
         # device look done (idle LED, and it opens a follow-up window) while it
-        # is actually still working — confusing on a slow web search. Show
+        # is actually still working. Show
         # `thinking` instead and arm the watchdog (which waits without a cap
         # while a tool is in flight); the tool's result response then flips the
         # phase to `replying`. Fast tools never reach here — their result reply
@@ -272,7 +216,7 @@ class PhaseEmitter(FrameProcessor):
                 last = max(armed_at, TURN_LIVENESS.last_activity)
                 if TURN_LIVENESS.in_flight > 0:
                     # A tool is running — the turn is alive by definition, and
-                    # a long web search must get all the time it needs (no
+                    # a long-running tool must get all the time it needs (no
                     # cap; see the module docstring). Log occasionally so a
                     # long wait is visibly deliberate in the log.
                     if now - last_inflight_log >= self.INFLIGHT_LOG_EVERY_S:
@@ -348,7 +292,7 @@ class PhaseEmitter(FrameProcessor):
         # that transport generates only on its first played packet) leaves the
         # Voice PE microphone open throughout the prebuffer window. Its own TTS
         # echo is then committed as new user turns. TTSStartedFrame is emitted by
-        # OpenAI before that queue and is the correct early mic-gating boundary.
+        # the provider before that queue and is the correct early mic-gating boundary.
         elif isinstance(frame, (TTSStartedFrame, BotStartedSpeakingFrame)):
             self._reply_active = True
             self._suppress_thinking = False

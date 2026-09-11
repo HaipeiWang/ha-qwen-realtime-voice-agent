@@ -1,7 +1,7 @@
-name: Qwen Realtime Voice Agent
-version: "0.10.0-beta.5"
+name: Natural Realtime Harness (Qwen Preview)
+version: "0.11.0-beta.1"
 slug: openai_realtime_voice_agent
-description: Native Qwen Realtime speech-to-speech voice agent for Home Assistant Voice PE, with automatic Home Assistant tools.
+description: Provider-neutral realtime Home Assistant harness; this preview ships the Qwen adapter and Voice PE audio transport.
 url: https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
 arch:
   - aarch64
@@ -17,7 +17,7 @@ homeassistant_api: true
 # ----------------------------------------------------------------------------
 # Options are ORDERED for the Configuration tab (HA renders them in this order)
 # and pseudo-grouped via name prefixes in translations/{en,zh-Hans}.yaml:
-#   🔑 Basics → 🗣️ Model & voice → 💬 Conversation → 🌐 Web search → 🎚️ Audio
+#   🔑 Basics → 🗣️ Model & voice → 💬 Conversation → 🎚️ Audio
 #   → 🏠 Home Assistant → ⚙️ Advanced → 🔍 Debug
 # User-facing help lives in translations/, not here — keep comments dev-facing.
 #
@@ -25,7 +25,6 @@ homeassistant_api: true
 # env fallbacks so absent vars are fine:
 #   semantic_vad_create_response → true  (false breaks every multi-turn chat:
 #     pipecat 0.0.97 only auto-creates the FIRST response, the 2nd turn hangs)
-#   enable_disconnect_tool → false  (model could hang up mid-conversation)
 #   interrupt_response → false  (handsfree barge-in shelved: the speaker→mic
 #     echo leak made the VAD cut replies / squeal; firmware is barge_in:false)
 #   device_input_sample_rate → 16000  (the Voice PE firmware always sends 16k)
@@ -95,12 +94,6 @@ options:
   vad_eagerness: "low"
   phase_idle_debounce_ms: 1500
 
-  # --- 🌐 Web search ---
-  enable_web_search: false
-  # Native Qwen Realtime cannot use its function tools and web search together.
-  # This legacy option remains optional for backward compatibility but is hidden
-  # on fresh installs.
-
   # --- 🎚️ Audio ---
   # 150 (not 0): cushions WS jitter so the speaker doesn't run dry mid-word
   # (the start-of-reply crackle); costs 150 ms of reply latency.
@@ -159,10 +152,6 @@ schema:
   wake_audio_guard_ms: int(0,2000)
   vad_eagerness: "list(low|medium|high|auto)"
   phase_idle_debounce_ms: int(0,10000)
-  # --- 🌐 Web search ---
-  enable_web_search: bool
-  web_search_model: str?
-  web_search_model_custom: str?
   # --- 🎚️ Audio ---
   playback_prebuffer_ms: int(0,2000)
   noise_reduction: "list(off|near_field|far_field)"

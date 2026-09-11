@@ -1,6 +1,6 @@
 """Smooth bursty realtime audio into clocked packets for Voice PE.
 
-OpenAI Realtime commonly delivers several hundred milliseconds of PCM at once,
+Realtime providers commonly deliver several hundred milliseconds of PCM at once,
 then nothing for up to a second.  Forwarding those bursts directly makes the
 small playback buffers on Voice PE repeatedly run dry.  This processor keeps a
 server-side queue, primes it once per bot-speaking segment, and emits PCM at
@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-from app.qwen_frames import QwenResponseDoneFrame
+from app.core.frames import ResponseDoneFrame, ResponseStartedFrame
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ class _ControlItem:
     frame: Frame
     direction: FrameDirection
     response_id: int
+    scope: object = None
 
 
 _QueueItem = Union[_AudioItem, _ControlItem]
@@ -73,13 +74,15 @@ class PacedAudioSender(FrameProcessor):
         # must be discarded until a new LLMFullResponseStartFrame arrives.
         self._drop_audio_until_start = False
         self._first_pcm_logged_for_response = False
-        self._on_response_drained: Optional[Callable[[], Awaitable[None]]] = None
+        self._on_response_drained = None
+        self._scoped_drain = False
 
     def set_response_drained_handler(
-        self, handler: Optional[Callable[[], Awaitable[None]]]
+        self, handler: Optional[Callable[..., Awaitable[None]]], *, scoped=False
     ) -> None:
         """Run an async callback after a full response boundary leaves the queue."""
         self._on_response_drained = handler
+        self._scoped_drain = scoped
 
     def _cancel_boundary_timeout(self) -> None:
         if self._boundary_task is not None and not self._boundary_task.done():
@@ -186,9 +189,12 @@ class PacedAudioSender(FrameProcessor):
             return
 
         if direction == FrameDirection.DOWNSTREAM and isinstance(
-            frame, LLMFullResponseStartFrame
+            frame, (ResponseStartedFrame, LLMFullResponseStartFrame)
         ):
-            await self._start_response()
+            # Neutral start survives assistant aggregators that consume LLM
+            # start frames, including silent/withheld responses needing drain.
+            if isinstance(frame, ResponseStartedFrame) or not self._response_active:
+                await self._start_response()
             await self.push_frame(frame, direction)
             return
 
@@ -263,13 +269,13 @@ class PacedAudioSender(FrameProcessor):
         # Pipecat data queue as the PCM frames. Unlike a direct callback it
         # cannot overtake audio still waiting behind the assistant aggregator.
         if direction == FrameDirection.DOWNSTREAM and isinstance(
-            frame, QwenResponseDoneFrame
+            frame, ResponseDoneFrame
         ):
             self._cancel_boundary_timeout()
             async with self._condition:
                 if self._closed or not self._response_active:
                     logger.debug(
-                        "Ordered Qwen response.done ignored without active "
+                        "Ordered provider response boundary ignored without active "
                         "paced response=%u generation=%u",
                         self._response_id,
                         frame.generation,
@@ -280,19 +286,20 @@ class PacedAudioSender(FrameProcessor):
                         LLMFullResponseEndFrame(),
                         FrameDirection.DOWNSTREAM,
                         self._response_id,
+                        frame.scope,
                     )
                 )
                 self._response_active = False
                 self._condition.notify_all()
             logger.info(
-                "Paced response %u received ordered Qwen response.done "
+                "Paced response %u received ordered provider response "
                 "boundary generation=%u",
                 self._response_id,
                 frame.generation,
             )
             return
 
-        # Only the FULL response end is an audio boundary. OpenAI emits
+        # Only the FULL response end is an audio boundary. Providers may emit
         # TTSStarted/TTSStopped around sentence-sized subsegments; treating
         # those as boundaries released 350-400 ms fragments and repeatedly
         # reset priming mid-answer. LLMFullResponseEndFrame permits a genuinely
@@ -325,6 +332,9 @@ class PacedAudioSender(FrameProcessor):
         return total, False
 
     async def _send_loop(self):
+        loop = asyncio.get_running_loop()
+        deadline = None
+        clock_response_id = None
         try:
             while not self._closed:
                 frame_to_send: Optional[OutputAudioRawFrame] = None
@@ -387,7 +397,10 @@ class PacedAudioSender(FrameProcessor):
                         and self._on_response_drained is not None
                     ):
                         try:
-                            await self._on_response_drained()
+                            if self._scoped_drain:
+                                await self._on_response_drained(control_to_send.scope)
+                            else:
+                                await self._on_response_drained()
                         except Exception:
                             logger.exception("Response-drained callback failed")
                     if isinstance(control_to_send.frame, EndFrame):
@@ -398,11 +411,20 @@ class PacedAudioSender(FrameProcessor):
                 if frame_to_send is not None:
                     if item_response_id != self._response_id:
                         continue
+                    now = loop.time()
+                    if clock_response_id != item_response_id or deadline is None:
+                        deadline = now
+                        clock_response_id = item_response_id
+                    # Rebase after a stall: never replay an accumulated backlog
+                    # as a burst. Small scheduler overhead remains compensated.
+                    if now - deadline >= packet_duration:
+                        logger.warning("Paced output clock rebased after %.1f ms delay", (now - deadline) * 1000)
+                        deadline = now
                     await self.push_frame(frame_to_send, FrameDirection.DOWNSTREAM)
-                    # Schedule from the completion of the send, never from an
-                    # old deadline. A delayed network write therefore cannot be
-                    # followed by a damaging catch-up burst.
-                    await asyncio.sleep(max(0.001, packet_duration))
+                    deadline += packet_duration
+                    if loop.time() >= deadline:
+                        deadline = loop.time() + packet_duration
+                    await asyncio.sleep(max(0.001, deadline - loop.time()))
         except asyncio.CancelledError:
             raise
         except Exception:

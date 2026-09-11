@@ -4,7 +4,7 @@ import asyncio
 import time
 
 from app.paced_audio_sender import PacedAudioSender
-from app.qwen_frames import QwenResponseDoneFrame
+from app.core.frames import ResponseDoneFrame, ResponseStartedFrame
 from pipecat.frames.frames import (
     OutputAudioRawFrame,
     LLMFullResponseEndFrame,
@@ -24,6 +24,46 @@ class CapturePacer(PacedAudioSender):
 
 
 async def main():
+    # Nonzero downstream processing must not accumulate into a slower stream.
+    class SlowCapture(CapturePacer):
+        async def push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
+            await super().push_frame(frame, direction)
+            if isinstance(frame, OutputAudioRawFrame):
+                await asyncio.sleep(0.008)
+
+    slow = SlowCapture()
+    slow._worker = asyncio.create_task(slow._send_loop())
+    await slow.process_frame(ResponseStartedFrame(), FrameDirection.DOWNSTREAM)
+    await slow.process_frame(OutputAudioRawFrame(audio=b"\0" * 48000,
+                            sample_rate=24000, num_channels=1), FrameDirection.DOWNSTREAM)
+    await slow.process_frame(ResponseDoneFrame(generation=1), FrameDirection.DOWNSTREAM)
+    await asyncio.sleep(1.7)
+    times = [t for t, f, _ in slow.sent if isinstance(f, OutputAudioRawFrame)]
+    assert len(times) == 50
+    assert 0.94 <= times[-1] - times[0] < 1.15, times[-1] - times[0]
+    assert min(b-a for a, b in zip(times, times[1:])) >= 0.010
+    await slow.cleanup()
+
+    class StalledCapture(CapturePacer):
+        async def push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
+            await super().push_frame(frame, direction)
+            if isinstance(frame, OutputAudioRawFrame) and len(self.sent) == 4:
+                await asyncio.sleep(0.120)
+
+    stalled = StalledCapture()
+    stalled._worker = asyncio.create_task(stalled._send_loop())
+    await stalled.process_frame(ResponseStartedFrame(), FrameDirection.DOWNSTREAM)
+    await stalled.process_frame(OutputAudioRawFrame(audio=b"\0" * 19200,
+                               sample_rate=24000, num_channels=1), FrameDirection.DOWNSTREAM)
+    await stalled.process_frame(ResponseDoneFrame(generation=1), FrameDirection.DOWNSTREAM)
+    await asyncio.sleep(0.8)
+    times = [t for t, f, _ in stalled.sent if isinstance(f, OutputAudioRawFrame)]
+    assert len(times) == 20
+    gaps = [b-a for a, b in zip(times, times[1:])]
+    assert max(gaps) >= 0.120, gaps
+    assert min(gaps) >= 0.010, gaps  # no catch-up burst after a blocked write
+    await stalled.cleanup()
+
     pacer = CapturePacer()
     drained = []
 
@@ -34,7 +74,7 @@ async def main():
     # A full PipelineTask supplies Pipecat's TaskManager for StartFrame. This
     # isolated smoke test starts only the pacer's own worker.
     pacer._worker = asyncio.create_task(pacer._send_loop())
-    await pacer.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+    await pacer.process_frame(ResponseStartedFrame(), FrameDirection.DOWNSTREAM)
     # Deliberately shorter than the 1.4 s prime target. Only the full-response
     # end may release this tail; sentence-scoped TTS stops are not boundaries.
     await pacer.process_frame(
@@ -44,7 +84,7 @@ async def main():
     # Qwen's provider marker follows PCM through the same ordered pipeline. The
     # equivalent generic Pipecat frame may arrive later and must be deduplicated.
     await pacer.process_frame(
-        QwenResponseDoneFrame(generation=1), FrameDirection.DOWNSTREAM
+        ResponseDoneFrame(generation=1), FrameDirection.DOWNSTREAM
     )
     await pacer.process_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
     await asyncio.sleep(0.25)
@@ -66,12 +106,12 @@ async def main():
     # response, and verify only the new sample value is emitted.
     pacer.sent.clear()
     drained.clear()
-    await pacer.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+    await pacer.process_frame(ResponseStartedFrame(), FrameDirection.DOWNSTREAM)
     await pacer.process_frame(
         OutputAudioRawFrame(audio=bytes([1, 0]) * 2400, sample_rate=24000, num_channels=1),
         FrameDirection.DOWNSTREAM,
     )
-    await pacer.process_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+    await pacer.process_frame(ResponseStartedFrame(), FrameDirection.DOWNSTREAM)
     await pacer.process_frame(
         OutputAudioRawFrame(audio=bytes([2, 0]) * 2400, sample_rate=24000, num_channels=1),
         FrameDirection.DOWNSTREAM,

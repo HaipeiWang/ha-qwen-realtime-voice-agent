@@ -1,12 +1,12 @@
 {
-  "name": "Qwen Realtime Voice Agent (Home Assistant Voice PE)",
+  "name": "Natural Home Assistant Realtime Harness",
   "url": "https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent",
   "maintainer": "HaipeiWang",
   "addons": [
     {
       "slug": "openai_realtime_voice_agent",
-      "name": "Qwen Realtime Voice Agent",
-      "version": "0.10.0-beta.4"
+      "name": "Natural Realtime Harness (Qwen Preview)",
+      "version": "0.11.0-beta.1"
     }
   ]
 }

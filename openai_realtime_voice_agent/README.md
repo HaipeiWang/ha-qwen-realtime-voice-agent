@@ -1,4 +1,7 @@
-# Qwen Realtime Voice Agent
+# Natural Home Assistant Realtime Harness
+
+Provider-neutral realtime Core and Home Assistant tool harness. The current
+preview ships the Qwen adapter; GLM is not implemented yet.
 
 ## What this Add-on does
 
@@ -16,14 +19,14 @@
 The companion firmware is published at
 [HaipeiWang/home-assistant-voice-pe-qwen](https://github.com/HaipeiWang/home-assistant-voice-pe-qwen).
 
-## New in 0.10.0-beta.5
+## New in 0.11.0-beta.1
 
-- Repairs allow-lists saved with spaces, commas or newlines and resolves legacy
-  names to the wire names returned by current Home Assistant Core.
-- Uses one validated tool policy for discovery, deterministic routing and Qwen
-  instructions, restoring power, temperature, fan-speed and stop controls.
-- Verifies asynchronous device state before speaking a result and keeps reply
-  audio protected until paced playback has fully drained.
+- Runs provider-independent turn, tool, confirmation and audio logic in the shared
+  Core; Qwen protocol details now live in one adapter.
+- Provides canonical provider events and a small adapter contract. Qwen is included
+  and tested; GLM remains planned.
+- Uses monotonic 24 kHz output pacing so processing overhead does not accumulate on
+  every audio packet, with safe clock rebasing after delayed sends.
 
 ## Before starting
 

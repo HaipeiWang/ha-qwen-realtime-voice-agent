@@ -1,4 +1,8 @@
-# Qwen Realtime Voice Agent — Setup and Validation
+# Natural Home Assistant Realtime Harness — Setup and Validation
+
+The shared Core and Home Assistant tool layer are provider-neutral. This preview
+ships only the Qwen adapter, so the visible provider settings below remain Qwen
+specific. GLM support is planned and is not available in this release.
 
 This Add-on is one half of the system. The Add-on runs the Qwen session and
 Home Assistant tools; the companion Voice PE firmware captures and plays audio.
@@ -25,7 +29,7 @@ Repositories**, add:
 https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent
 ```
 
-Install **Qwen Realtime Voice Agent**. HAOS builds the Add-on locally from
+Install **Natural Realtime Harness (Qwen Preview)**. HAOS builds the Add-on locally from
 the included Dockerfile for `amd64` or `aarch64`. The first build downloads the
 Python dependencies and may take several minutes. Use the installation log to
 follow progress.
