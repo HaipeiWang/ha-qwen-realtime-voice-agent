@@ -189,6 +189,9 @@ class RealtimeCoreService(FrameProcessor):
         return (self.session.instructions + "\n只调用实际注册工具：" + names
                 + "。控制前必须执行工具，按执行证据简短确认。名称/别名优先，歧义先澄清。"
                 + "不要虚构当前时间、天气或设备状态；使用相应读取工具。"
+                + "天气每轮调用GetWeather：用户地点原样传location，不根据时区或实体名猜城市。"
+                + "唯一天气实体可省略entity_id；不确定ID时用type=catalog读取真实选择。明天使用type=daily、day=tomorrow。"
+                + "工具拒绝地点匹配时说明覆盖限制；读取失败不等于没有接入天气，不能以当前天气替代预报。"
                 + "\nAssist 暴露实体：" + entities)
 
     async def open_conversation(self, timeout_s=6.0):

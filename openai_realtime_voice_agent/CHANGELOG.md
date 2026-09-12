@@ -2,6 +2,22 @@
 
 All notable changes to this add-on. Newest first.
 
+## Unreleased — 2026-09-12
+
+### Fixed
+
+- Expose actual Assist weather targets and supported forecast types through
+  `GetWeather` catalog results, without guessing entity IDs.
+- Resolve home/here queries to the sole exposed weather target; require a
+  choice for multiple targets and reject unverified city or district coverage.
+- Filter tomorrow's forecast using the Home Assistant timezone. Do not replace
+  missing forecasts with current conditions or another day's data.
+- Distinguish unavailable data, unsupported forecast types, missing dates and
+  invalid targets; failed reads no longer imply that weather is not configured.
+- Update shared weather instructions and add regression coverage. The clean
+  public tree passes 151 tests; audio, cancellation behavior and configuration
+  are unchanged.
+
 ## 0.11.0-beta.1
 
 ### Added

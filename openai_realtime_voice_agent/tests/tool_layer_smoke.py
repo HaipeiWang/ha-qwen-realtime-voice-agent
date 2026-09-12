@@ -25,7 +25,7 @@ class ToolLayerTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, json={"time_zone": "Asia/Shanghai"})
             if path.startswith("/api/states/"):
                 return httpx.Response(200, json={"entity_id": path.rsplit("/", 1)[-1], "state": "sunny",
-                    "attributes": {"friendly_name": "家", "temperature": 24, "temperature_unit": "°C"}})
+                    "attributes": {"friendly_name": "家", "temperature": 24, "temperature_unit": "°C", "supported_features": 3}})
             return httpx.Response(200, json={"service_response": {"weather.home": {"forecast": self.forecast}}})
 
         self.client = httpx.AsyncClient(base_url="http://ha/", transport=httpx.MockTransport(transport))
@@ -64,7 +64,7 @@ class ToolLayerTests(unittest.IsolatedAsyncioTestCase):
     async def test_forecast_is_service_response_not_current_state(self):
         result = await self.execute("GetWeather", type="daily")
         self.assertEqual(result.data["forecast"], self.forecast)
-        self.assertIn("return_response", self.calls[-1].url.params)
+        self.assertTrue(any(r.method == "POST" and "return_response" in r.url.params for r in self.calls))
 
     async def test_missing_forecast_is_unknown(self):
         self.forecast = []
@@ -81,6 +81,62 @@ class ToolLayerTests(unittest.IsolatedAsyncioTestCase):
         self.exposed.add("weather.office")
         result = await self.execute("GetWeather")
         self.assertEqual(result.result.detail, "weather_target_required")
+
+    async def test_weather_catalog_has_real_ids_and_capabilities(self):
+        result = await self.execute("GetWeather", type="catalog")
+        self.assertEqual(result.data["choices"][0]["entity_id"], "weather.home")
+        self.assertEqual(result.data["choices"][0]["types"], ["current", "daily", "hourly"])
+        self.assertFalse(any(r.method == "POST" for r in self.calls))
+
+    async def test_home_and_here_select_unique_weather(self):
+        for location in ("家里", "这里"):
+            result = await self.execute("GetWeather", location=location)
+            self.assertEqual(result.result.status, "completed")
+            self.assertEqual(result.data["entity_id"], "weather.home")
+
+    async def test_city_and_ambiguous_region_do_not_fall_back_to_home(self):
+        for location in ("上海", "徐汇区", "附近", "纽约"):
+            result = await self.execute("GetWeather", location=location, entity_id="weather.home", type="daily")
+            self.assertEqual(result.result.detail, "weather_location_unverified")
+            self.assertNotIn("forecast", result.data)
+        self.assertFalse(any(r.method == "POST" for r in self.calls))
+
+    async def test_wrong_id_returns_usable_choices(self):
+        result = await self.execute("GetWeather", entity_id="weather.invented")
+        self.assertEqual(result.result.detail, "weather_not_exposed")
+        self.assertEqual(result.data["choices"][0]["entity_id"], "weather.home")
+        self.assertFalse(any("invented" in str(r.url) for r in self.calls))
+
+    async def test_unsupported_forecast_never_calls_service(self):
+        result = await self.execute("GetWeather", type="twice_daily")
+        self.assertEqual(result.result.detail, "weather_forecast_unsupported")
+        self.assertFalse(any(r.method == "POST" for r in self.calls))
+
+    async def test_current_cannot_answer_tomorrow(self):
+        result = await self.execute("GetWeather", type="current", day="tomorrow")
+        self.assertEqual(result.result.detail, "weather_forecast_required")
+        self.assertNotIn("measurements", result.data)
+
+    async def test_tomorrow_filters_in_home_timezone(self):
+        self.forecast = [{"datetime": "2026-07-01T15:00:00Z", "temperature": 11},
+                         {"datetime": "2026-07-01T16:00:00Z", "temperature": 22}]
+        result = await self.execute("GetWeather", type="daily", day="tomorrow")
+        self.assertEqual(result.data["requested_date"], "2026-07-02")
+        self.assertEqual(result.data["forecast"], [self.forecast[1]])
+        self.assertNotIn("measurements", result.data)
+
+    async def test_missing_requested_date_never_uses_other_date(self):
+        result = await self.execute("GetWeather", type="daily", day="tomorrow")
+        self.assertEqual(result.result.detail, "forecast_date_missing")
+
+    async def test_weather_transport_failure_is_not_no_integration(self):
+        async def fail(entity, kind):
+            raise httpx.ReadTimeout("private transport details")
+        self.backend.weather_forecast = fail
+        result = await self.execute("GetWeather", type="daily")
+        self.assertEqual(result.result.status, "unknown")
+        self.assertEqual(result.result.detail, "weather_fetch_failed")
+        self.assertNotIn("private", str(result.data))
 
     async def test_unknown_tool_and_invalid_parameters_never_dispatch(self):
         self.assertEqual((await self.execute("ScheduleDevice")).result.status, "failed")
