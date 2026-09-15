@@ -1,5 +1,5 @@
 name: Natural Realtime Harness (Qwen Preview)
-version: "0.11.0-beta.1"
+version: "0.11.0-beta.2"
 slug: openai_realtime_voice_agent
 description: Provider-neutral realtime Home Assistant harness; this preview ships the Qwen adapter and Voice PE audio transport.
 url: https://github.com/HaipeiWang/ha-qwen-realtime-voice-agent

@@ -2,7 +2,34 @@
 
 All notable changes to this add-on. Newest first.
 
-## Unreleased — 2026-09-12
+## 0.11.0-beta.2 — 2026-09-16
+
+### Fixed
+
+- Resolve MCP multi-name entity entries against complete HA registry aliases,
+  including the computed-name placeholder used by Core 2026.9.2. This fixes
+  reproduced control rejection before MCP dispatch when an entity has aliases.
+- Fetch full entity details because registry list responses omit alias metadata.
+- Bound startup alias enrichment to a 10-second work budget, four pending detail
+  requests and a two-second per-detail timeout. Isolate failed/deleted entities,
+  ignore late responses, and retain completed enrichment after timeout or disconnect.
+- Preserve the original MCP catalog on foundational lookup failure and propagate
+  caller cancellation. Empty catalogs avoid network requests.
+
+### Validation and remaining issues
+
+- 169 automated tests pass. The alias fix passed real HA Core 2026.9.2 control
+  comparisons; the subsequent startup fault-tolerance changes were tested with
+  injected asynchronous failures, not a new full-device deployment.
+- This release does not fix missing Assist exposure or entities in an unexpected
+  domain. Name-based generated-tool filtering still needs review for duplicate
+  names across exposed and unexposed entities.
+- Computed names differing from friendly names, special rendered names and
+  model alias hints remain incomplete. Full image/startup and Voice PE audio
+  acceptance for this release remain pending.
+- See [hotfix notes](HOTFIX_20260916.md) for scope, evidence and known limitations.
+
+## 2026-09-12 — included in 0.11.0-beta.2
 
 ### Fixed
 

@@ -1,3 +1,5 @@
+> **0.11.0-beta.2 hotfix:** repairs alias-related control rejection and makes startup enrichment resilient. See [hotfix notes](openai_realtime_voice_agent/HOTFIX_20260916.md) for validation and remaining issues.
+
 <p align="center">
   <img src="openai_realtime_voice_agent/icon.png" alt="Natural Home Assistant Realtime Harness" width="160"/>
 </p>

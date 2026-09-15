@@ -1,3 +1,5 @@
+> **0.11.0-beta.2 紧急修复：** 修复实体别名导致的控制拒绝，并补齐初始化容错。已知限制和验证范围见[修复说明](openai_realtime_voice_agent/HOTFIX_20260916.md)。
+
 <p align="center">
   <img src="openai_realtime_voice_agent/icon.png" alt="Natural Home Assistant Realtime Harness" width="160"/>
 </p>
