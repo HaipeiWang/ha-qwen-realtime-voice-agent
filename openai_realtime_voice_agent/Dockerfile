@@ -33,7 +33,11 @@ RUN apt-get update \
 # to wheels and needs no native LLVM/cmake build.
 COPY pyproject.toml /tmp/app_build/pyproject.toml
 COPY app/ /tmp/app_build/app/
-RUN PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+# Default to official PyPI to avoid depending on a third-party mirror's availability.
+# Manual builds may override the index with --build-arg PYPI_INDEX_URL=...
+ARG PYPI_INDEX_URL=https://pypi.org/simple
+# Environment settings also reach pip's isolated build-dependency subprocess.
+RUN PIP_INDEX_URL="${PYPI_INDEX_URL}" PIP_RETRIES=8 PIP_TIMEOUT=60 \
     pip3 install /tmp/app_build \
     && rm -rf /tmp/app_build
 
