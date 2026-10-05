@@ -6,6 +6,19 @@ from pipecat.services.mcp_service import MCPClient, StreamableHttpParameters
 logger = logging.getLogger(__name__)
 
 
+class HomeAssistantMCPClient(MCPClient):
+    """Keep the SDK result envelope for the existing shared result classifier."""
+
+    async def _call_tool(self, session, function_name, arguments, result_callback):
+        # Pipecat 0.0.97 flattens content to text and drops isError. HA 2026.10
+        # uses that flag independently of its JSON data. Reuse SDK transport,
+        # discovery and registration; only replace the lossy result callback.
+        # Let transport exceptions reach Pipecat's existing wrapper, without
+        # retrying a write whose outcome may already have been committed.
+        result = await session.call_tool(function_name, arguments=arguments)
+        await result_callback(result.model_dump(mode="json", exclude_none=True))
+
+
 class HomeAssistantMCPService:
     """Home Assistant MCP service using Pipecat's MCPClient."""
     
@@ -35,7 +48,7 @@ class HomeAssistantMCPService:
             )
             
             # Create MCP client
-            self.mcp_client = MCPClient(server_params=server_params)
+            self.mcp_client = HomeAssistantMCPClient(server_params=server_params)
             
             logger.info("✅ Home Assistant MCP Client initialized")
             return self.mcp_client
@@ -47,7 +60,6 @@ class HomeAssistantMCPService:
     def get_client(self) -> Optional[MCPClient]:
         """Get the MCP client instance."""
         return self.mcp_client
-
 
 
 

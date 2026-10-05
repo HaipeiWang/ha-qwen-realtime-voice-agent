@@ -2,6 +2,27 @@
 
 All notable changes to this add-on. Newest first.
 
+## 0.11.0-beta.3 — 2026-10-05
+
+### Fixed
+
+- Preserve MCP `isError` and content through the existing SDK/Pipecat binding,
+  so tool failures cannot be mistaken for successful text responses.
+- Accept Home Assistant Core 2026.10 GetLiveContext results without the legacy
+  `success` field, while retaining older Core response formats and tool names.
+- Reject JSON-RPC and MCP error responses during startup catalog discovery.
+
+### Validation and compatibility
+
+- 180 automated tests pass, including 11 new MCP response-contract tests for
+  legacy and Core 2026.10.0b0 formats, partial actions and schema metadata.
+- Reuses the existing MCP SDK, tool policy and result classifier. Pipecat stays
+  pinned to 0.0.97; no new runtime dependencies, options or firmware changes.
+- HAOS 18.3 review found no required OS-specific changes. Complete installation,
+  host reboot recovery and Voice PE acceptance on HAOS 18.3 / Core 2026.10 remain
+  unverified. Older environments retain their existing API prerequisites.
+- See [compatibility notes](HOTFIX_20261005.md) for setup and validation scope.
+
 ## 0.11.0-beta.2 — 2026-09-16
 
 ### Fixed

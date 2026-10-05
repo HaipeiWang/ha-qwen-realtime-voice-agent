@@ -27,6 +27,13 @@ def normalize_live_context(value):
         return value
     result = {key: normalize_live_context(item) if isinstance(item, (dict, list, str)) else item
               for key, item in value.items()}
+    # This boundary is used only for GetLiveContext. Core 2026.10 removed the
+    # success field; retain the old read-result contract for a real context.
+    # MCP isError remains in the outer envelope and takes precedence.
+    if ("success" not in result and not result.get("error")
+            and isinstance(result.get("result"), str)
+            and result["result"].startswith("Live Context:")):
+        result["success"] = True
     if value.get("domain") == "light" and isinstance(value.get("attributes"), dict):
         attrs = result["attributes"]
         raw = attrs.get("brightness")

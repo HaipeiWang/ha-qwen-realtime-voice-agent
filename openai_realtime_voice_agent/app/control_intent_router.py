@@ -821,7 +821,10 @@ def _call_mcp_tool(
     with request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8")
     data = json.loads(body)
-    content = (data.get("result") or {}).get("content") or []
+    result = data.get("result") or {}
+    if data.get("error") or result.get("isError"):
+        raise ValueError("Home Assistant MCP tool returned an error")
+    content = result.get("content") or []
     parts = []
     for item in content:
         if isinstance(item, dict) and item.get("type") == "text":

@@ -1,3 +1,5 @@
+> **0.11.0-beta.3 compatibility patch:** preserves MCP error flags and supports Core 2026.10 response formats alongside older Core. See [compatibility notes](openai_realtime_voice_agent/HOTFIX_20261005.md).
+
 > **0.11.0-beta.2 hotfix:** repairs alias-related control rejection and makes startup enrichment resilient. See [hotfix notes](openai_realtime_voice_agent/HOTFIX_20260916.md) for validation and remaining issues.
 
 <p align="center">
